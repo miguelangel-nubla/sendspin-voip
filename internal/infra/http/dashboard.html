@@ -376,6 +376,45 @@
       color: #7dd3fc;
     }
 
+    .tag.path-pass {
+      background: rgba(16, 185, 129, 0.2);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+
+    .tag.path-xcode {
+      background: rgba(251, 146, 60, 0.18);
+      color: #fdba74;
+      border: 1px solid rgba(251, 146, 60, 0.35);
+    }
+
+    .tag.path-buf {
+      background: rgba(56, 189, 248, 0.18);
+      color: #7dd3fc;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+    }
+
+    .path-stages {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      color: var(--text-dim);
+    }
+
+    .path-stages .stage {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .path-stages .stage-idx {
+      color: var(--muted);
+      min-width: 1.2rem;
+    }
+
     .tag.offered {
       background: rgba(245, 158, 11, 0.12);
       color: #fcd34d;
@@ -569,6 +608,7 @@
         const st = streams[id];
         const prod = (st.producers && st.producers.length > 0) ? st.producers[0] : {};
         const cons = (st.consumers && st.consumers.length > 0) ? st.consumers[0] : {};
+        const path = st.audio_path || {};
 
         let statusClass = 'status-idle';
         let statusText = st.state || 'IDLE';
@@ -596,6 +636,19 @@
         let sipOfferedHTML = '';
         if (cons.offered_codecs && cons.offered_codecs.length > 0) {
           sipOfferedHTML = cons.offered_codecs.map(c => `<span class="tag codec">${escapeHTML(c)}</span>`).join(' ');
+        }
+
+        const pathMode = path.mode || 'idle';
+        let pathTagClass = 'tag';
+        if (pathMode === 'opus_passthrough') pathTagClass = 'tag path-pass';
+        else if (pathMode === 'transcode') pathTagClass = 'tag path-xcode';
+        else if (pathMode === 'buffering' || pathMode === 'dialing') pathTagClass = 'tag path-buf';
+
+        let pathStagesHTML = '';
+        if (path.stages && path.stages.length > 0) {
+          pathStagesHTML = '<div class="path-stages">' + path.stages.map((stage, i) =>
+            `<div class="stage"><span class="stage-idx">${i + 1}.</span><span>${escapeHTML(stage)}</span></div>`
+          ).join('') + '</div>';
         }
 
         html += `
@@ -646,10 +699,34 @@
               ` : ''}
             </div>
 
-            <!-- Step 2: Downstream Egress -->
+            <!-- Step 2: Audio processing path -->
             <div class="pipeline-step">
               <div class="step-header">
-                <span>2. Downstream (SIP Signaling & RTP Audio Egress)</span>
+                <span>2. Audio Path</span>
+                <span class="${pathTagClass}">${escapeHTML(pathMode.replace(/_/g, ' ').toUpperCase())}</span>
+              </div>
+              <div class="step-content">
+                <div class="step-endpoint">${escapeHTML(path.summary || 'No active path')}</div>
+                <div class="step-tags">
+                  <span class="${pathTagClass}">${path.passthrough ? 'PASSTHROUGH' : (pathMode === 'transcode' ? 'TRANSCODE' : escapeHTML(pathMode.toUpperCase()))}</span>
+                  <span class="tag">${path.muted ? 'MUTED' : ((path.volume_percent != null ? path.volume_percent : st.volume) + '%')}</span>
+                  ${path.buffer_mode ? `<span class="tag mode">${escapeHTML(path.buffer_mode)}</span>` : ''}
+                  ${path.ingress_format ? `<span class="tag">in: ${escapeHTML(path.ingress_format)}</span>` : ''}
+                  ${path.egress_format ? `<span class="tag">out: ${escapeHTML(path.egress_format)}</span>` : ''}
+                </div>
+              </div>
+              ${pathStagesHTML}
+              <div class="step-subinfo">
+                ${path.passthrough_packets ? `<span>Passthrough pkts: ${path.passthrough_packets}</span>` : ''}
+                ${path.transcode_packets ? `<span>Transcode pkts: ${path.transcode_packets}</span>` : ''}
+                ${path.pre_answer_buffered ? `<span>Pre-answer buffer: ${path.pre_answer_buffered} chunks</span>` : ''}
+              </div>
+            </div>
+
+            <!-- Step 3: Downstream Egress -->
+            <div class="pipeline-step">
+              <div class="step-header">
+                <span>3. Downstream (SIP Signaling & RTP Audio Egress)</span>
                 <span>${cons.state ? escapeHTML(cons.state.toUpperCase()) : 'IDLE'}</span>
               </div>
               <div class="step-content">

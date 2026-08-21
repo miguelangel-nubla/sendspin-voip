@@ -512,8 +512,18 @@ func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 	call.mu.Unlock()
 }
 
-// OnVolumeChange updates player volume gain.
+// OnVolumeChange updates player volume gain. After the SIP call is answered,
+// the RTP pacer queue is flushed so the new level applies immediately.
+// The pre-answer announcement buffer (call.buffer) is left intact — those
+// chunks are still raw PCM/Opus and get the current volume when flushed on answer.
 func (s *BridgeService) OnVolumeChange(playerID string, volume int, muted bool) {
+	if volume > 100 {
+		volume = 100
+	}
+	if volume < 0 {
+		volume = 0
+	}
+
 	s.playersMu.Lock()
 	if p, ok := s.players[playerID]; ok {
 		p.Volume = volume
@@ -521,6 +531,18 @@ func (s *BridgeService) OnVolumeChange(playerID string, volume int, muted bool) 
 		s.logger.Debug("Player volume changed", "player_id", playerID, "volume", volume, "muted", muted)
 	}
 	s.playersMu.Unlock()
+
+	if val, ok := s.activeCalls.Load(playerID); ok {
+		call := val.(*activeCallState)
+		call.mu.Lock()
+		answered := call.answered
+		rtp := call.rtpSession
+		call.mu.Unlock()
+		// Only flush RTP after answer; never touch call.buffer (announcement hold)
+		if answered && rtp != nil {
+			rtp.ClearBuffer()
+		}
+	}
 }
 
 // OnGroupUpdate tracks multi-room sync group membership.
@@ -663,8 +685,19 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		IsGrouped: isGrouped,
 		Volume:    vol,
 		Muted:     muted,
+		AudioPath: AudioPathDebugInfo{
+			Mode:          "idle",
+			Summary:       "idle — no active RTP path",
+			Stages:        []string{"idle"},
+			VolumePercent: vol,
+			Muted:         muted,
+			BufferMode:    string(cfg.BufferMode),
+		},
 		Producers: make([]ProducerDebugInfo, 0, 1),
 		Consumers: make([]ConsumerDebugInfo, 0, 1),
+	}
+	if info.AudioPath.BufferMode == "" {
+		info.AudioPath.BufferMode = string(s.config.DefaultBufferMode)
 	}
 
 	if isPlaying {
@@ -728,6 +761,14 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		BytesReceived:  ingStats.BytesReceived,
 	})
 
+	info.AudioPath.IngressCodec = ingStats.Codec
+	info.AudioPath.IngressFormat = prodFormat
+	if muted {
+		info.AudioPath.VolumePercent = 0
+	} else {
+		info.AudioPath.VolumePercent = vol
+	}
+
 	// 2. Gather Consumer Info (SIP/RTP Egress)
 	allCodecs := domain.PrioritizeCodecs(cfg.Codec, nil)
 	var offeredSIPCodecs []string
@@ -749,6 +790,7 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		priority := call.session.Priority
 		bufferedCount := len(call.buffer)
 		lingerActive := (call.lingerTimer != nil)
+		answered := call.answered
 		startTime := call.session.StartTime
 		answerTime := call.session.AnswerTime
 		callID := ""
@@ -788,8 +830,56 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		}
 
 		bitrateOut := 64
+		egressCh := 1
 		if activeCodec == domain.CodecOpus {
 			bitrateOut = 96
+			egressCh = 2
+			if rtpStats.PathIngressChannels == 1 {
+				egressCh = 1
+			}
+		}
+
+		egressFormat := fmt.Sprintf("%s %dHz %dch (%d kbps)", strings.ToUpper(string(activeCodec)), activeCodec.SampleRate(), egressCh, bitrateOut)
+		info.AudioPath.EgressCodec = string(activeCodec)
+		info.AudioPath.EgressFormat = egressFormat
+		info.AudioPath.BufferMode = effectiveMode
+		info.AudioPath.PreAnswerBuffered = bufferedCount
+		info.AudioPath.PassthroughPackets = rtpStats.PassthroughPackets
+		info.AudioPath.TranscodePackets = rtpStats.TranscodePackets
+
+		switch {
+		case !answered && bufferedCount > 0:
+			info.AudioPath.Mode = "buffering"
+			info.AudioPath.Passthrough = false
+			info.AudioPath.Summary = fmt.Sprintf("pre-answer buffer (%d chunks, mode=%s) — volume applied on flush", bufferedCount, effectiveMode)
+			info.AudioPath.Stages = []string{
+				"ingress " + prodFormat,
+				fmt.Sprintf("hold in announcement buffer (%d chunks)", bufferedCount),
+				"waiting for SIP answer",
+				"then apply " + volumeStageForDebug(info.AudioPath.VolumePercent, muted),
+				"then → RTP " + strings.ToUpper(string(activeCodec)),
+			}
+		case rtpStats.PathMode != "":
+			info.AudioPath.Mode = rtpStats.PathMode
+			info.AudioPath.Passthrough = rtpStats.PathMode == "opus_passthrough"
+			info.AudioPath.Summary = rtpStats.PathSummary
+			info.AudioPath.Stages = rtpStats.PathStages
+			if rtpStats.PathVolumePercent > 0 || rtpStats.PathMode != "" {
+				info.AudioPath.VolumePercent = rtpStats.PathVolumePercent
+			}
+			if rtpStats.PathIngressCodec != "" {
+				info.AudioPath.IngressCodec = rtpStats.PathIngressCodec
+				info.AudioPath.IngressFormat = fmt.Sprintf("%s %dHz %dch",
+					strings.ToUpper(rtpStats.PathIngressCodec), rtpStats.PathIngressRate, rtpStats.PathIngressChannels)
+			}
+		case answered:
+			info.AudioPath.Mode = "transcode"
+			info.AudioPath.Summary = prodFormat + " → processing → RTP " + strings.ToUpper(string(activeCodec))
+			info.AudioPath.Stages = []string{"ingress " + prodFormat, "RTP " + strings.ToUpper(string(activeCodec))}
+		default:
+			info.AudioPath.Mode = "dialing"
+			info.AudioPath.Summary = "SIP dialing — media path not active yet"
+			info.AudioPath.Stages = []string{"ingress " + prodFormat, "SIP dialing", "RTP pending"}
 		}
 
 		info.Consumers = append(info.Consumers, ConsumerDebugInfo{
@@ -803,7 +893,7 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 			NegotiatedSDP:  fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(activeCodec)), activeCodec.PayloadType(), activeCodec.RTPClockRate()),
 			RTPClockRate:   activeCodec.RTPClockRate(),
 			PayloadType:    activeCodec.PayloadType(),
-			Format:         fmt.Sprintf("%s %dHz 1ch (%d kbps)", strings.ToUpper(string(activeCodec)), activeCodec.SampleRate(), bitrateOut),
+			Format:         egressFormat,
 			LocalRTP:       localRTPStr,
 			RemoteRTP:      rtpStats.RemoteAddr,
 			AutoAnswer:     autoAnswerDesc,
@@ -825,6 +915,17 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		if cfg.Codec == domain.CodecOpus {
 			bitrateOut = 96
 		}
+		egressFormat := fmt.Sprintf("%s %dHz 1ch (%d kbps)", strings.ToUpper(string(cfg.Codec)), cfg.Codec.SampleRate(), bitrateOut)
+		info.AudioPath.EgressCodec = string(cfg.Codec)
+		info.AudioPath.EgressFormat = egressFormat
+		info.AudioPath.BufferMode = string(bMode)
+		info.AudioPath.Summary = "idle — " + prodFormat + " ⇢ (no call) ⇢ " + strings.ToUpper(string(cfg.Codec))
+		info.AudioPath.Stages = []string{
+			"ingress " + prodFormat,
+			"no active SIP/RTP session",
+			"configured egress " + strings.ToUpper(string(cfg.Codec)),
+		}
+
 		info.Consumers = append(info.Consumers, ConsumerDebugInfo{
 			Type:          "SIP/RTP Egress",
 			URL:           cfg.SIPTarget,
@@ -835,7 +936,7 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 			NegotiatedSDP: fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(cfg.Codec)), cfg.Codec.PayloadType(), cfg.Codec.RTPClockRate()),
 			RTPClockRate:  cfg.Codec.RTPClockRate(),
 			PayloadType:   cfg.Codec.PayloadType(),
-			Format:        fmt.Sprintf("%s %dHz 1ch (%d kbps)", strings.ToUpper(string(cfg.Codec)), cfg.Codec.SampleRate(), bitrateOut),
+			Format:        egressFormat,
 			AutoAnswer:    autoAnswerDesc,
 			BufferMode:    string(bMode),
 			Priority:      cfg.Priority,
@@ -844,4 +945,15 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 	}
 
 	return info
+}
+
+func volumeStageForDebug(volumePercent int, muted bool) string {
+	if muted || volumePercent <= 0 {
+		return "volume mute"
+	}
+	if volumePercent >= 100 {
+		return "volume 100% (0 dB)"
+	}
+	db := (float64(volumePercent)/100.0)*60.0 - 60.0
+	return fmt.Sprintf("volume %d%% (%.0f dB)", volumePercent, db)
 }

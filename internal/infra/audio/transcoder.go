@@ -8,14 +8,21 @@ import (
 
 	"github.com/gotranspile/g722"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
+	"github.com/thesyncim/gopus"
 	resampler "github.com/tphakala/go-audio-resampler"
 	"github.com/zaf/g711"
 )
 
 // Transcoder implements app.AudioTranscoderPort with high-performance pure Go transcoding.
+// Instances are per-RTP-session: G.722 and Opus encoders are stateful.
 type Transcoder struct {
-	mu      sync.Mutex
-	g722Enc *g722.Encoder
+	mu         sync.Mutex
+	g722Enc    *g722.Encoder
+	opusEnc    *gopus.Encoder
+	opusEncCh  int
+	opusDec    *gopus.Decoder
+	opusDecCh  int
+	opusPCMBuf []int16 // accumulates to Opus frame (960/ch @ 48 kHz / 20 ms)
 }
 
 // NewTranscoder creates a new audio transcoder.
@@ -28,9 +35,64 @@ func (t *Transcoder) Reset() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.g722Enc = nil
+	if t.opusEnc != nil {
+		t.opusEnc.Reset()
+	}
+	t.opusEnc = nil
+	t.opusEncCh = 0
+	if t.opusDec != nil {
+		t.opusDec.Reset()
+	}
+	t.opusDec = nil
+	t.opusDecCh = 0
+	t.opusPCMBuf = nil
 }
 
-// Transcode converts raw PCM samples to target codec payload with downmixing, resampling, and volume scaling.
+// DecodeOpusToPCM decodes an Opus packet to interleaved int32 PCM at 48 kHz.
+// channels should match the stream (1 or 2); invalid values default to 2.
+func (t *Transcoder) DecodeOpusToPCM(opusData []byte, channels int) ([]int32, error) {
+	if len(opusData) == 0 {
+		return nil, nil
+	}
+	if channels != 1 && channels != 2 {
+		channels = 2
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.opusDec == nil || t.opusDecCh != channels {
+		dec, err := gopus.NewDecoder(gopus.DecoderConfig{
+			SampleRate: 48000,
+			Channels:   channels,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("opus decoder init: %w", err)
+		}
+		t.opusDec = dec
+		t.opusDecCh = channels
+	}
+
+	// Up to 120ms stereo at 48 kHz
+	pcm := make([]int16, 5760*channels)
+	n, err := t.opusDec.DecodeInt16(opusData, pcm)
+	if err != nil {
+		return nil, fmt.Errorf("opus decode: %w", err)
+	}
+	if n <= 0 {
+		return nil, nil
+	}
+
+	total := n * channels
+	out := make([]int32, total)
+	for i := 0; i < total; i++ {
+		out[i] = int32(pcm[i])
+	}
+	return out, nil
+}
+
+// Transcode converts raw PCM samples to target codec payload with volume scaling.
+// Mono-only SIP codecs (G.711/G.722/L16) downmix to mono. Opus preserves stereo.
 func (t *Transcoder) Transcode(
 	samples []int32,
 	srcRate int,
@@ -49,29 +111,19 @@ func (t *Transcoder) Transcode(
 		srcRate = 48000
 	}
 
-	// 1. Downmix to Mono (int32)
+	// Opus: keep stereo when present (matches SDP opus/48000/2 and passthrough).
+	if dstCodec == domain.CodecOpus {
+		return t.transcodeOpus(samples, srcRate, srcChannels, volumePercent)
+	}
+
+	// Legacy VoIP codecs are mono-only.
 	mono := t.DownmixToMono(samples, srcChannels)
-
-	// 2. Apply digital software volume gain
 	mono = t.ApplyVolume(mono, volumePercent)
-
-	// 3. Resample to target sample rate
 	dstRate := dstCodec.SampleRate()
 	resampled := t.Resample(mono, srcRate, dstRate)
 
-	// 4. Convert int32 samples to int16 with clean range clamping
-	pcm16 := make([]int16, len(resampled))
-	for i, s := range resampled {
-		val := s
-		if val > 32767 {
-			val = 32767
-		} else if val < -32768 {
-			val = -32768
-		}
-		pcm16[i] = int16(val)
-	}
+	pcm16 := clampToInt16(resampled)
 
-	// 5. Encode into target codec
 	switch dstCodec {
 	case domain.CodecPCMU:
 		payload := make([]byte, len(pcm16))
@@ -108,12 +160,113 @@ func (t *Transcoder) Transcode(
 		}
 		return payload, nil
 
-	case domain.CodecOpus:
-		return nil, fmt.Errorf("opus codec streaming is supported via direct Sendspin stream passthrough; PCM to Opus software re-encoding is not supported")
-
 	default:
 		return nil, fmt.Errorf("unsupported destination codec: %s", dstCodec)
 	}
+}
+
+func (t *Transcoder) transcodeOpus(samples []int32, srcRate, srcChannels, volumePercent int) ([]byte, error) {
+	channels := srcChannels
+	if channels != 1 && channels != 2 {
+		// Odd layouts → stereo downmix of first 2 / average; safest is mono.
+		samples = t.DownmixToMono(samples, srcChannels)
+		channels = 1
+	}
+
+	samples = t.ApplyVolume(samples, volumePercent)
+
+	if srcRate != 48000 {
+		if channels == 1 {
+			samples = t.Resample(samples, srcRate, 48000)
+		} else {
+			// Per-channel resample then re-interleave
+			left := make([]int32, len(samples)/2)
+			right := make([]int32, len(samples)/2)
+			for i := 0; i < len(left); i++ {
+				left[i] = samples[i*2]
+				right[i] = samples[i*2+1]
+			}
+			left = t.Resample(left, srcRate, 48000)
+			right = t.Resample(right, srcRate, 48000)
+			n := len(left)
+			if len(right) < n {
+				n = len(right)
+			}
+			out := make([]int32, n*2)
+			for i := 0; i < n; i++ {
+				out[i*2] = left[i]
+				out[i*2+1] = right[i]
+			}
+			samples = out
+		}
+	}
+
+	return t.encodeOpus(clampToInt16(samples), channels)
+}
+
+func clampToInt16(samples []int32) []int16 {
+	pcm16 := make([]int16, len(samples))
+	for i, s := range samples {
+		val := s
+		if val > 32767 {
+			val = 32767
+		} else if val < -32768 {
+			val = -32768
+		}
+		pcm16[i] = int16(val)
+	}
+	return pcm16
+}
+
+// encodeOpus encodes 48 kHz PCM (mono or stereo interleaved) into an Opus packet.
+func (t *Transcoder) encodeOpus(pcm16 []int16, channels int) ([]byte, error) {
+	if channels != 1 && channels != 2 {
+		channels = 1
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.opusEnc == nil || t.opusEncCh != channels {
+		enc, err := gopus.NewEncoder(gopus.EncoderConfig{
+			SampleRate:  48000,
+			Channels:    channels,
+			Application: gopus.ApplicationAudio,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("opus encoder init: %w", err)
+		}
+		_ = enc.SetBitrate(96_000)
+		t.opusEnc = enc
+		t.opusEncCh = channels
+		t.opusPCMBuf = nil
+	}
+
+	frameSize := t.opusEnc.FrameSize() // samples per channel
+	if frameSize <= 0 {
+		frameSize = 960
+	}
+	needed := frameSize * channels
+
+	t.opusPCMBuf = append(t.opusPCMBuf, pcm16...)
+	if len(t.opusPCMBuf) < needed {
+		return nil, nil
+	}
+
+	frame := t.opusPCMBuf[:needed]
+	t.opusPCMBuf = t.opusPCMBuf[needed:]
+
+	out := make([]byte, 4000)
+	n, err := t.opusEnc.EncodeInt16(frame, out)
+	if err != nil {
+		return nil, fmt.Errorf("opus encode: %w", err)
+	}
+	if n <= 0 {
+		return nil, nil
+	}
+	payload := make([]byte, n)
+	copy(payload, out[:n])
+	return payload, nil
 }
 
 // DownmixToMono mixes multi-channel interleaved PCM samples into a single mono channel.
@@ -135,7 +288,11 @@ func (t *Transcoder) DownmixToMono(samples []int32, channels int) []int32 {
 	return mono
 }
 
-// ApplyVolume applies a linear amplitude multiplier based on volume percentage [0-100].
+// ApplyVolume applies perceptual (dB-tapered) gain for UI volume 0–100.
+//
+// A linear 50% amplitude cut is only −6 dB, which sounds nearly as loud as full
+// scale. We map the slider onto a −60 dB … 0 dB fader instead (common for media
+// players), so 50% ≈ −30 dB (~1/32 amplitude) and reads as clearly quieter.
 func (t *Transcoder) ApplyVolume(samples []int32, volumePercent int) []int32 {
 	if volumePercent >= 100 {
 		return samples
@@ -147,9 +304,9 @@ func (t *Transcoder) ApplyVolume(samples []int32, volumePercent int) []int32 {
 		return samples
 	}
 
-	// Perceptual audio scaling curve (logarithmic / polynomial approximation)
-	gain := float64(volumePercent) / 100.0
-	factor := math.Pow(gain, 1.5)
+	const minDB = -60.0
+	db := (float64(volumePercent)/100.0)*(-minDB) + minDB // 0→-60, 100→0
+	factor := math.Pow(10, db/20.0)
 
 	out := make([]int32, len(samples))
 	for i, s := range samples {

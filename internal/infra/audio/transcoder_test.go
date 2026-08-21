@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"math"
 	"testing"
 
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
@@ -72,5 +73,86 @@ func TestTranscoder_StereoToMonoAndResample(t *testing.T) {
 	}
 	if len(l16Payload) != 48000*2 {
 		t.Errorf("expected %d bytes for L16 1 second at 48kHz, got %d", 48000*2, len(l16Payload))
+	}
+}
+
+func TestTranscoder_OpusEncodeWithVolume(t *testing.T) {
+	trans := NewTranscoder()
+
+	// 20ms of 48kHz mono (after stereo downmix path: feed stereo 20ms)
+	src := make([]int32, 48000/50*2) // 1920 interleaved
+	for i := range src {
+		src[i] = 8000
+	}
+
+	payload, err := trans.Transcode(src, 48000, 2, domain.CodecOpus, 50)
+	if err != nil {
+		t.Fatalf("opus encode at 50%% volume failed: %v", err)
+	}
+	if len(payload) == 0 {
+		t.Fatal("expected non-empty opus packet for 20ms frame")
+	}
+
+	muted, err := trans.Transcode(src, 48000, 2, domain.CodecOpus, 0)
+	if err != nil {
+		t.Fatalf("opus encode muted failed: %v", err)
+	}
+	if len(muted) == 0 {
+		t.Fatal("expected silence opus packet when muted")
+	}
+}
+
+func TestApplyVolume_DBTaper(t *testing.T) {
+	trans := NewTranscoder()
+	src := []int32{10000, -10000, 5000}
+
+	half := trans.ApplyVolume(append([]int32(nil), src...), 50)
+	// 50% → −30 dB → factor ≈ 0.03162
+	const wantFactor = 0.031622776
+	got := float64(half[0]) / 10000.0
+	if got < wantFactor*0.9 || got > wantFactor*1.1 {
+		t.Fatalf("50%% factor got %f, want ~%f (−30 dB)", got, wantFactor)
+	}
+
+	full := trans.ApplyVolume(append([]int32(nil), src...), 100)
+	if full[0] != 10000 {
+		t.Fatalf("100%% should be unity, got %d", full[0])
+	}
+
+	oldCurve := math.Pow(0.5, 1.5) // previous curve ≈ 0.35 (−9 dB)
+	if got >= oldCurve*0.5 {
+		t.Fatalf("50%% should be much quieter than old pow(1.5) curve (%f), got %f", oldCurve, got)
+	}
+}
+
+func TestTranscoder_OpusDecodeThenVolumeEncode(t *testing.T) {
+	trans := NewTranscoder()
+
+	// Build a real opus packet first
+	src := make([]int32, 1920)
+	for i := range src {
+		src[i] = 12000
+	}
+	pkt, err := trans.Transcode(src, 48000, 2, domain.CodecOpus, 100)
+	if err != nil || len(pkt) == 0 {
+		t.Fatalf("setup encode failed: %v len=%d", err, len(pkt))
+	}
+
+	trans.Reset()
+
+	pcm, err := trans.DecodeOpusToPCM(pkt, 2)
+	if err != nil {
+		t.Fatalf("DecodeOpusToPCM: %v", err)
+	}
+	if len(pcm) < 960 {
+		t.Fatalf("expected decoded pcm, got %d samples", len(pcm))
+	}
+
+	quiet, err := trans.Transcode(pcm, 48000, 2, domain.CodecOpus, 25)
+	if err != nil {
+		t.Fatalf("re-encode at 25%%: %v", err)
+	}
+	if len(quiet) == 0 {
+		t.Fatal("expected re-encoded packet")
 	}
 }

@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/pion/rtp"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/app"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
+	"github.com/pion/rtp"
 )
 
 // TranscoderFactory creates a fresh audio transcoder for each RTP session.
@@ -109,7 +110,7 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 		ssrc:                      ssrc,
 		seq:                       1,
 		timestamp:                 1000,
-		audioQueue:                make(chan []byte, 1000), // 20ms packet buffer (up to 20s, prevents dropping bursts)
+		audioQueue:                make(chan []byte, 125), // ~2.5s @ 20ms; enough for announcement flush, responsive to volume
 		stopChan:                  make(chan struct{}),
 		isFirstPacketAfterSilence: true,
 	}
@@ -144,6 +145,17 @@ type Session struct {
 
 	packetsSent uint64
 	bytesSent   uint64
+
+	// Audio path telemetry (last PushAudio decision)
+	pathMode            string
+	pathSummary         string
+	pathStages          []string
+	pathVolumePercent   int
+	pathIngressCodec    string
+	pathIngressRate     int
+	pathIngressChannels int
+	passthroughPackets  uint64
+	transcodePackets    uint64
 }
 
 func (s *Session) LocalPort() int {
@@ -160,11 +172,20 @@ func (s *Session) Stats() app.RTPStats {
 	}
 
 	return app.RTPStats{
-		LocalPort:   s.localPort,
-		RemoteAddr:  remoteStr,
-		Codec:       s.codec,
-		PacketsSent: s.packetsSent,
-		BytesSent:   s.bytesSent,
+		LocalPort:           s.localPort,
+		RemoteAddr:          remoteStr,
+		Codec:               s.codec,
+		PacketsSent:         s.packetsSent,
+		BytesSent:           s.bytesSent,
+		PathMode:            s.pathMode,
+		PathSummary:         s.pathSummary,
+		PathStages:          append([]string(nil), s.pathStages...),
+		PathVolumePercent:   s.pathVolumePercent,
+		PathIngressCodec:    s.pathIngressCodec,
+		PathIngressRate:     s.pathIngressRate,
+		PathIngressChannels: s.pathIngressChannels,
+		PassthroughPackets:  s.passthroughPackets,
+		TranscodePackets:    s.transcodePackets,
 	}
 }
 
@@ -284,28 +305,108 @@ func (s *Session) sendRTPPacket(payload []byte, timestampDelta uint32, codec dom
 	}
 }
 
+// opusPCMDecoder is optionally implemented by the transcoder for Opus volume re-encode.
+type opusPCMDecoder interface {
+	DecodeOpusToPCM(opusData []byte, channels int) ([]int32, error)
+}
+
 // PushAudio accumulates raw PCM samples or forwards native Opus frames to the pacer queue.
+// Opus passthrough is used only at full volume; otherwise decoded PCM is gain-adjusted and
+// re-encoded via the transcoder so volume/mute always apply.
 func (s *Session) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Direct Opus passthrough: if incoming chunk already has encoded Opus frame
-	if len(chunk.OpusData) > 0 && s.codec == domain.CodecOpus {
+	if volumePercent > 100 {
+		volumePercent = 100
+	}
+	if volumePercent < 0 {
+		volumePercent = 0
+	}
+
+	ingressCodec := "pcm"
+	if len(chunk.OpusData) > 0 {
+		ingressCodec = "opus"
+	}
+	ingressRate := chunk.SampleRate
+	ingressCh := chunk.Channels
+	if ingressRate <= 0 {
+		ingressRate = 48000
+	}
+	if ingressCh <= 0 {
+		ingressCh = 2
+	}
+
+	// Direct Opus passthrough only when volume is unity (no gain stage needed)
+	if len(chunk.OpusData) > 0 && s.codec == domain.CodecOpus && volumePercent >= 100 {
+		s.recordPath(pathSnapshot{
+			mode:            "opus_passthrough",
+			volume:          volumePercent,
+			ingressCodec:    ingressCodec,
+			ingressRate:     ingressRate,
+			ingressChannels: ingressCh,
+			decodedLocally:  false,
+			passthrough:     true,
+		})
 		select {
 		case s.audioQueue <- chunk.OpusData:
+			s.passthroughPackets++
 		default:
 			// Queue full; drop to maintain real-time pacing
 		}
 		return nil
 	}
 
+	samples := chunk.Samples
+	sampleRate := chunk.SampleRate
+	channels := chunk.Channels
+	decodedLocally := false
+
+	// Any non-passthrough path needs PCM. If ingress sent Opus without usable samples
+	// (decode miss upstream), decode locally for every egress codec — not only Opus.
+	if len(samples) == 0 && len(chunk.OpusData) > 0 {
+		if dec, ok := s.transcoder.(opusPCMDecoder); ok {
+			decoded, err := dec.DecodeOpusToPCM(chunk.OpusData, channels)
+			if err != nil {
+				return err
+			}
+			samples = decoded
+			sampleRate = 48000
+			if channels != 1 && channels != 2 {
+				channels = 2
+			}
+			decodedLocally = true
+		}
+	}
+
+	if len(samples) == 0 {
+		return nil
+	}
+	if sampleRate <= 0 {
+		sampleRate = 48000
+	}
+	if channels <= 0 {
+		channels = 2
+	}
+
+	s.recordPath(pathSnapshot{
+		mode:            "transcode",
+		volume:          volumePercent,
+		ingressCodec:    ingressCodec,
+		ingressRate:     sampleRate,
+		ingressChannels: channels,
+		decodedLocally:  decodedLocally || (ingressCodec == "opus" && len(chunk.Samples) > 0),
+		passthrough:     false,
+		egressChannels:  channels,
+	})
+
 	// Samples per 20ms frame at source rate (e.g. 48000 * 0.02 * 2 = 1920 interleaved samples)
-	frameSamples := (chunk.SampleRate * chunk.Channels * 20) / 1000
+	frameSamples := (sampleRate * channels * 20) / 1000
 	if frameSamples <= 0 {
 		frameSamples = 1920
 	}
 
-	s.pcmBuffer = append(s.pcmBuffer, chunk.Samples...)
+	s.pcmBuffer = append(s.pcmBuffer, samples...)
 
 	for len(s.pcmBuffer) >= frameSamples {
 		frame := s.pcmBuffer[:frameSamples]
@@ -313,17 +414,21 @@ func (s *Session) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 
 		payload, err := s.transcoder.Transcode(
 			frame,
-			chunk.SampleRate,
-			chunk.Channels,
+			sampleRate,
+			channels,
 			s.codec,
 			volumePercent,
 		)
 		if err != nil {
 			return err
 		}
+		if len(payload) == 0 {
+			continue // Opus may buffer until a full encode frame is ready
+		}
 
 		select {
 		case s.audioQueue <- payload:
+			s.transcodePackets++
 		default:
 			// Queue full; drop to maintain real-time pacing
 		}
@@ -332,11 +437,99 @@ func (s *Session) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 	return nil
 }
 
+type pathSnapshot struct {
+	mode            string
+	volume          int
+	ingressCodec    string
+	ingressRate     int
+	ingressChannels int
+	decodedLocally  bool
+	passthrough     bool
+	egressChannels  int // 0 = derive from codec defaults
+}
+
+func (s *Session) recordPath(p pathSnapshot) {
+	s.pathMode = p.mode
+	s.pathVolumePercent = p.volume
+	s.pathIngressCodec = p.ingressCodec
+	s.pathIngressRate = p.ingressRate
+	s.pathIngressChannels = p.ingressChannels
+
+	outCh := p.egressChannels
+	if s.codec != domain.CodecOpus {
+		outCh = 1 // G.711 / G.722 / L16 are mono
+	} else if outCh <= 0 {
+		outCh = p.ingressChannels
+		if outCh != 1 && outCh != 2 {
+			outCh = 2
+		}
+	}
+
+	inLabel := fmt.Sprintf("%s %dHz %dch", strings.ToUpper(p.ingressCodec), p.ingressRate, p.ingressChannels)
+	outLabel := fmt.Sprintf("%s %dHz %dch", strings.ToUpper(string(s.codec)), s.codec.SampleRate(), outCh)
+	volLabel := volumeStageLabel(p.volume)
+
+	var stages []string
+	stages = append(stages, "ingress "+inLabel)
+
+	if p.passthrough {
+		stages = append(stages, "passthrough (no decode/encode, "+volLabel+")")
+		stages = append(stages, "RTP "+outLabel)
+		s.pathSummary = inLabel + " → passthrough → RTP " + strings.ToUpper(string(s.codec))
+	} else {
+		if p.ingressCodec == "opus" || p.decodedLocally {
+			if p.decodedLocally {
+				stages = append(stages, "decode Opus → PCM")
+			} else {
+				stages = append(stages, "PCM from ingress Opus decode")
+			}
+		}
+		// Mono-only codecs always downmix; Opus keeps stereo
+		if s.codec != domain.CodecOpus && p.ingressChannels > 1 {
+			stages = append(stages, "downmix → mono")
+		}
+		stages = append(stages, volLabel)
+		if s.codec == domain.CodecOpus {
+			if p.ingressRate != 48000 {
+				stages = append(stages, fmt.Sprintf("resample %dHz → 48000Hz", p.ingressRate))
+			}
+			chLabel := "mono"
+			if outCh == 2 {
+				chLabel = "stereo"
+			}
+			stages = append(stages, "encode OPUS ("+chLabel+")")
+		} else {
+			if p.ingressRate != s.codec.SampleRate() {
+				stages = append(stages, fmt.Sprintf("resample %dHz → %dHz", p.ingressRate, s.codec.SampleRate()))
+			}
+			stages = append(stages, "encode "+strings.ToUpper(string(s.codec))+" (mono)")
+		}
+		stages = append(stages, "RTP "+outLabel)
+		s.pathSummary = inLabel + " → transcode (" + volLabel + ") → RTP " + strings.ToUpper(string(s.codec))
+	}
+	s.pathStages = stages
+}
+
+func volumeStageLabel(volumePercent int) string {
+	if volumePercent <= 0 {
+		return "volume mute (silence)"
+	}
+	if volumePercent >= 100 {
+		return "volume 100% (0 dB)"
+	}
+	// Match transcoder −60 dB … 0 dB taper
+	db := (float64(volumePercent)/100.0)*60.0 - 60.0
+	return fmt.Sprintf("volume %d%% (%.0f dB)", volumePercent, db)
+}
+
 // ClearBuffer flushes any pending PCM samples and queued RTP packets.
 func (s *Session) ClearBuffer() {
 	s.mu.Lock()
 	s.pcmBuffer = nil
 	s.isFirstPacketAfterSilence = true
+	if resetter, ok := s.transcoder.(interface{ Reset() }); ok {
+		resetter.Reset()
+	}
 	s.mu.Unlock()
 
 	// Drain all pending packets from audioQueue

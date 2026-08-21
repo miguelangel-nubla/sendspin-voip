@@ -124,7 +124,7 @@ players:
 `sendspin-voip` includes an integrated web dashboard and debug API similar to **go2rtc**:
 
 - **Web Dashboard**: Open `http://localhost:8080/` in your browser to inspect active streams, upstream Sendspin ingress audio formats, live track metadata, downstream SIP targets, offered/negotiated codecs, RTP sockets, and packet counters.
-- **`GET /api/streams`**: Returns a JSON representation of all registered virtual players, upstream audio sources, codecs, and downstream SIP/RTP sessions.
+- **`GET /api/streams`**: Returns a JSON representation of all registered virtual players, upstream audio sources, codecs, downstream SIP/RTP sessions, and live `audio_path` (passthrough vs transcode stages, volume dB, packet counters).
 - **`GET /api/info`**: System metrics, memory usage, goroutines, uptime, and SIP registration status.
 - **`GET /api/codecs`**: Specifications of supported audio codecs (Opus, G.722, PCMU, PCMA, PCM).
 
@@ -138,7 +138,7 @@ Security notes for host-network installs:
 ## 🛠️ Supported Hardware & Codecs
 
 - **Hardware**: Any generic SIP phone or paging amplifier (Grandstream, Yealink, Fanvil, Snom, Cisco, Polycom, CyberData, Algo, 2N, etc.) or PBX (Asterisk, FreePBX, 3CX, FreeSWITCH).
-- **Audio Codecs**: Opus (48kHz direct stream passthrough & pure-Go decode), G.722 (HD Voice / 16kHz wideband), G.711 µ-law / A-law (8kHz narrowband).
+- **Audio Codecs**: Opus (48kHz passthrough at full volume; CGO-free re-encode with volume/mute via gopus), G.722 (HD Voice / 16kHz wideband), G.711 µ-law / A-law (8kHz narrowband).
 
 ---
 
