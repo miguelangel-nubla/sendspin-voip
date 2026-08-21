@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Run Tests
+        run: |
+          CGO_ENABLED=0 go test -v -race ./...
+
+      - name: Verify Static Build
+        run: |
+          CGO_ENABLED=0 go build -trimpath -o /tmp/sendspin-voip ./cmd/sendspin-voip

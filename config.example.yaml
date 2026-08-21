@@ -1,0 +1,75 @@
+# sendspin-voip Configuration Example
+log_level: info # debug, info, warn, error
+
+# SIP PBX / Server Connection
+sip:
+  mode: pbx # "pbx" (registered with credentials) or "direct" (peer-to-peer LAN dialing)
+  server: "192.168.1.50:5060"
+  username: "sendspin_bridge"
+  password: "your_sip_password"
+  domain: "192.168.1.50"
+  transport: udp # udp or tcp
+  local_ip: "" # Leave blank for auto-detection of host LAN IP
+  local_sip_port: 5060
+  rtp_port_min: 10000
+  rtp_port_max: 20000
+
+  # Default Auto-Answer Preset:
+  # Options: default, intercom, yealink, grandstream, snom, call_info, p_auto, none, custom
+  auto_answer_preset: default
+  custom_auto_answer_header: ""
+
+# Sendspin Server / Discovery
+sendspin:
+  server: "auto" # "auto" uses mDNS (_sendspin._tcp), or specify "ws://192.168.1.10:8095"
+  buffer_ms: 500
+
+# Bridge Runtime Tuning
+bridge:
+  default_buffer_mode: announcement # announcement, live
+  pickup_buffer_ms: 2000 # Max audio buffered during SIP call handshake
+  drain_delay_ms: 500 # Trailing silence before BYE (prevents cutting end of TTS)
+  target_conflict_policy: preempt_for_announcements # preempt_for_announcements, preempt_always, busy
+
+# Virtual Player mappings to SIP targets
+# The same SIP target can be mapped to multiple players with different behaviors!
+players:
+  # Player 1: Desk Phone Profile for High-Priority Announcements (Zero clipping)
+  - id: "office_phone_announcement"
+    name: "Office Phone (Announcements)"
+    sip_target: "sip:101@192.168.1.50"
+    codec: g722 # g722 (HD Voice), pcmu (u-law), pcma (A-law), opus
+    buffer_mode: announcement # Plays from sample 0 once answered
+    auto_answer: intercom # Force auto-answer on speakerphone
+    priority: 10 # High priority: preempts background music on Ext 101
+    default_volume: 100
+
+  # Player 2: Desk Phone Profile for Background Music (Live sync)
+  - id: "office_phone_music"
+    name: "Office Phone (Music)"
+    sip_target: "sip:101@192.168.1.50"
+    codec: g722
+    buffer_mode: live # Locks to live clock sync with other multi-room speakers
+    auto_answer: intercom
+    priority: 1
+    default_volume: 60
+
+  # Player 3: Desk Phone Profile for Doorbell / Chime (Phone Rings Handset)
+  - id: "office_phone_ring"
+    name: "Office Phone (Doorbell Ring)"
+    sip_target: "sip:101@192.168.1.50"
+    codec: pcmu
+    buffer_mode: announcement
+    auto_answer: none # Do not auto-answer; phone will ring
+    priority: 5
+    default_volume: 90
+
+  # Player 4: Warehouse Intercom Paging Horn (Direct IP Dialing)
+  - id: "warehouse_paging"
+    name: "Warehouse Paging Horn"
+    sip_target: "sip:192.168.1.180:5060" # Direct P2P dialing
+    codec: pcmu
+    buffer_mode: announcement
+    auto_answer: grandstream
+    priority: 10
+    default_volume: 100

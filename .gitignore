@@ -1,0 +1,7 @@
+bin/
+dist/
+sendspin-voip
+config.yaml
+*.local.yaml
+.DS_Store
+*.log
