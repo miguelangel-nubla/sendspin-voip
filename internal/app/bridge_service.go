@@ -331,8 +331,8 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 			"new_player", playerID,
 			"target", session.SIPTarget,
 		)
-		// Pause upstream Music Assistant for the preempted player so it stops feeding audio
-		s.ingress.SendPauseToUpstream(preempted.PlayerID)
+		// Stop upstream Music Assistant for the preempted player so it stops feeding audio
+		s.ingress.SendStopToUpstream(preempted.PlayerID)
 		// Synchronously terminate the preempted call to prevent INVITE collision / 486 Busy
 		s.terminatePlayerCallSync(preempted.PlayerID, false, 500*time.Millisecond)
 	}
@@ -439,7 +439,7 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 	select {
 	case <-dialog.Done():
 		s.logger.Info("Remote SIP phone hung up", "player_id", cfg.ID, "target", cfg.SIPTarget)
-		s.ingress.SendPauseToUpstream(cfg.ID)
+		s.ingress.SendStopToUpstream(cfg.ID)
 		s.terminatePlayerCall(cfg.ID, true)
 	case <-session.Ctx.Done():
 		// Local termination

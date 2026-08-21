@@ -47,7 +47,7 @@ func (d *dummyIngress) RegisterPlayerWithCodecs(player domain.PlayerConfig, code
 func (d *dummyIngress) UnregisterPlayer(playerID string) error {
 	return nil
 }
-func (d *dummyIngress) SendPauseToUpstream(playerID string) {}
+func (d *dummyIngress) SendStopToUpstream(playerID string) {}
 func (d *dummyIngress) GetPlayerStats(playerID string) (app.IngressPlayerStats, bool) {
 	return app.IngressPlayerStats{
 		ServerAddr:     "127.0.0.1:8927",

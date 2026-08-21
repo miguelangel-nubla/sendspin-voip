@@ -203,9 +203,9 @@ type PlayerIngressPort interface {
 	RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs []domain.Codec, handler PlayerEventHandler) error
 	// UnregisterPlayer stops and disconnects a virtual Sendspin player client.
 	UnregisterPlayer(playerID string) error
-	// SendPauseToUpstream sends a pause command to Music Assistant for the given player.
-	// Called when the remote phone hangs up to stop the upstream stream.
-	SendPauseToUpstream(playerID string)
+	// SendStopToUpstream sends a stop command to Music Assistant for the given player.
+	// Called when the remote phone hangs up (or the call is preempted) to stop the upstream stream.
+	SendStopToUpstream(playerID string)
 	// GetPlayerStats retrieves current ingress stats and metadata for a player.
 	GetPlayerStats(playerID string) (IngressPlayerStats, bool)
 	// StopAll disconnects all virtual players.

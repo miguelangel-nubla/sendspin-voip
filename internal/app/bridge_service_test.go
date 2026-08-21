@@ -179,7 +179,7 @@ func (m *mockIngress) StopAll() error {
 	return nil
 }
 
-func (m *mockIngress) SendPauseToUpstream(playerID string) {}
+func (m *mockIngress) SendStopToUpstream(playerID string) {}
 
 func (m *mockIngress) GetPlayerStats(playerID string) (IngressPlayerStats, bool) {
 	return IngressPlayerStats{

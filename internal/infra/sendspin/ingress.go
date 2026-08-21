@@ -373,9 +373,10 @@ func BuildSupportedFormatsForCodecs(codecs []domain.Codec, preferred domain.Code
 	return formats, supportCodecs, supportSampleRates, supportChannels
 }
 
-// SendPauseToUpstream sends a pause command to Music Assistant for the given player.
-// This is called when the remote SIP phone hangs up, to stop MA from continuing to stream.
-func (ing *Ingress) SendPauseToUpstream(playerID string) {
+// SendStopToUpstream sends a stop command to Music Assistant for the given player.
+// This is called when the remote SIP phone hangs up (or the call is preempted), to
+// stop MA from continuing to stream since there is no longer anywhere to deliver it.
+func (ing *Ingress) SendStopToUpstream(playerID string) {
 	ing.mu.Lock()
 	w, ok := ing.workers[playerID]
 	ing.mu.Unlock()
@@ -387,12 +388,12 @@ func (ing *Ingress) SendPauseToUpstream(playerID string) {
 		return
 	}
 	payload := map[string]any{
-		"controller": map[string]any{"command": "pause"},
+		"controller": map[string]any{"command": "stop"},
 	}
 	if err := client.Send("client/command", payload); err != nil {
-		ing.logger.Warn("Failed to send pause to upstream Music Assistant", "player_id", playerID, "err", err)
+		ing.logger.Warn("Failed to send stop to upstream Music Assistant", "player_id", playerID, "err", err)
 	} else {
-		ing.logger.Info("Sent pause to upstream Music Assistant (phone hung up)", "player_id", playerID)
+		ing.logger.Info("Sent stop to upstream Music Assistant (call ended)", "player_id", playerID)
 	}
 }
 
@@ -430,7 +431,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 			ClientID:       w.cfg.ID,
 			Name:           w.cfg.Name,
 			Version:        1,
-			SupportedRoles: []string{"player@v1", "metadata@v1"},
+			SupportedRoles: []string{"player@v1", "metadata@v1", "controller@v1"},
 			PlayerV1Support: protocol.PlayerV1Support{
 				SupportedFormats:   supportedFormats,
 				BufferCapacity:     1048576,
