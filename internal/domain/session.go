@@ -48,7 +48,7 @@ func NewCallSession(
 	return &CallSession{
 		ID:           id,
 		PlayerID:     playerID,
-		SIPTarget:    sipTarget,
+		SIPTarget:    NormalizeSIPTarget(sipTarget),
 		Priority:     priority,
 		State:        StateIdle,
 		Metadata:     meta,

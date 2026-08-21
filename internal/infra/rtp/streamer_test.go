@@ -5,13 +5,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/miguelangel-nubla/sendspin-voip/internal/app"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/infra/audio"
 )
 
 func TestStreamer_CreateSessionAndPushAudio(t *testing.T) {
-	transcoder := audio.NewTranscoder()
-	streamer := NewStreamer(nil, transcoder, 20000, 20050)
+	streamer := NewStreamer(nil, func() app.AudioTranscoderPort {
+		return audio.NewTranscoder()
+	}, 20000, 20050)
 
 	sess, err := streamer.CreateSession(domain.CodecG722)
 	if err != nil {
@@ -62,8 +64,9 @@ func TestStreamer_CreateSessionAndPushAudio(t *testing.T) {
 }
 
 func TestStreamer_OpusPassthrough(t *testing.T) {
-	transcoder := audio.NewTranscoder()
-	streamer := NewStreamer(nil, transcoder, 20100, 20150)
+	streamer := NewStreamer(nil, func() app.AudioTranscoderPort {
+		return audio.NewTranscoder()
+	}, 20100, 20150)
 
 	sess, err := streamer.CreateSession(domain.CodecOpus)
 	if err != nil {

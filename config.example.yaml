@@ -4,6 +4,8 @@ log_level: info # debug, info, warn, error
 # Web UI & Debug HTTP API (go2rtc style)
 http:
   listen: ":8080" # Web UI dashboard at http://localhost:8080/ and JSON at /api/streams
+  api_token: "" # Optional: require Authorization: Bearer <token>, X-Api-Token, or ?token=
+  enable_pprof: false # Expose /debug/pprof (keep false on host-network installs)
 
 # SIP PBX / Server Connection
 sip:

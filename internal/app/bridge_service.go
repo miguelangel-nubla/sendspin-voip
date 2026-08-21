@@ -44,6 +44,7 @@ type BridgeService struct {
 	playersMu   sync.RWMutex
 	players     map[string]*domain.Player
 	activeCalls sync.Map // keyed by playerID -> *activeCallState
+	probeCodecs sync.Map // keyed by playerID -> []domain.Codec (last successful probe)
 }
 
 // NewBridgeService creates a new bridge service.
@@ -122,9 +123,15 @@ func (s *BridgeService) probeAndSyncPlayer(cfg domain.PlayerConfig) {
 	codecs, err := s.sipCaller.ProbeTarget(ctx, cfg.SIPTarget)
 	if err != nil {
 		s.logger.Debug("Downstream SIP target probe note", "player_id", cfg.ID, "target", cfg.SIPTarget, "err", err)
-		// If probe fails (e.g. PBX starting up or strict firewall), still register with fallback codecs so player is not blocked
-		codecs = domain.PrioritizeCodecs(cfg.Codec, nil)
+		// Keep last successful discovery to avoid flip-flop reconnect storms.
+		if cached, ok := s.probeCodecs.Load(cfg.ID); ok {
+			codecs = cached.([]domain.Codec)
+		} else {
+			codecs = domain.PrioritizeCodecs(cfg.Codec, nil)
+		}
 	} else {
+		codecs = domain.PrioritizeCodecs(cfg.Codec, codecs)
+		s.probeCodecs.Store(cfg.ID, codecs)
 		s.logger.Info("Discovered downstream SIP target capabilities",
 			"player_id", cfg.ID,
 			"target", cfg.SIPTarget,
@@ -164,27 +171,33 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		call.mu.Lock()
 		state := call.session.GetState()
 		if state == domain.StateActive || state == domain.StateDialing {
-			if call.lingerTimer != nil {
-				call.lingerTimer.Stop()
-				call.lingerTimer = nil
+			// Confirm this call is still the map entry (avoid reuse-after-terminate race)
+			if cur, still := s.activeCalls.Load(playerID); !still || cur != call {
+				call.mu.Unlock()
+			} else {
+				if call.lingerTimer != nil {
+					call.lingerTimer.Stop()
+					call.lingerTimer = nil
+				}
+				call.session.Metadata = meta
+				call.buffer = nil
+				call.mu.Unlock()
+
+				if call.rtpSession != nil {
+					call.rtpSession.ClearBuffer()
+				}
+
+				s.logger.Info("Reusing active SIP call session for stream (seek/next track)",
+					"player_id", playerID,
+					"target", playerCfg.SIPTarget,
+					"title", meta.Title,
+					"artist", meta.Artist,
+				)
+				return
 			}
-			call.session.Metadata = meta
-			call.buffer = nil
+		} else {
 			call.mu.Unlock()
-
-			if call.rtpSession != nil {
-				call.rtpSession.ClearBuffer()
-			}
-
-			s.logger.Info("Reusing active SIP call session for stream (seek/next track)",
-				"player_id", playerID,
-				"target", playerCfg.SIPTarget,
-				"title", meta.Title,
-				"artist", meta.Artist,
-			)
-			return
 		}
-		call.mu.Unlock()
 	}
 
 	effectiveMode := playerCfg.BufferMode
@@ -230,6 +243,8 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 			"new_player", playerID,
 			"target", session.SIPTarget,
 		)
+		// Pause upstream Music Assistant for the preempted player so it stops feeding audio
+		s.ingress.SendPauseToUpstream(preempted.PlayerID)
 		// Synchronously terminate the preempted call to prevent INVITE collision / 486 Busy
 		s.terminatePlayerCallSync(preempted.PlayerID, false, 500*time.Millisecond)
 	}
@@ -398,16 +413,30 @@ func (s *BridgeService) OnAudioChunk(playerID string, chunk domain.AudioChunk) {
 	answered := call.answered
 	if !answered {
 		if call.session.EffectiveMod == domain.BufferModeAnnouncement {
-			// Limit ring buffer to max configured capacity
-			maxCapacity := (s.config.PickupBufferMs / 20) + 10 // ~50 chunks per sec
-			if len(call.buffer) < maxCapacity {
+			// Ring buffer: drop oldest chunks when full so TTS start is preserved after long dials
+			maxCapacity := (s.config.PickupBufferMs / 20) + 10 // ~50 chunks per sec at 20ms
+			if maxCapacity < 1 {
+				maxCapacity = 1
+			}
+			if len(call.buffer) >= maxCapacity {
+				// Drop oldest: shift left by keeping the newest maxCapacity-1, then append
+				call.buffer = append(call.buffer[1:], chunk)
+			} else {
 				call.buffer = append(call.buffer, chunk)
 			}
 		}
 		call.mu.Unlock()
 		return
 	}
+	mode := call.session.EffectiveMod
 	call.mu.Unlock()
+
+	// Live mode: drop chunks that arrived too late relative to Sendspin PlayAt
+	if mode == domain.BufferModeLive && !chunk.PlayAt.IsZero() {
+		if late := time.Since(chunk.PlayAt); late > 100*time.Millisecond {
+			return
+		}
+	}
 
 	s.playersMu.RLock()
 	volume := 100

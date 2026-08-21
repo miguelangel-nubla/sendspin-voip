@@ -17,10 +17,12 @@ import (
 
 // ServerConfig holds HTTP server configuration parameters.
 type ServerConfig struct {
-	Listen    string
-	Version   string
-	Commit    string
-	BuildDate string
+	Listen      string
+	APIToken    string
+	EnablePprof bool
+	Version     string
+	Commit      string
+	BuildDate   string
 }
 
 // Server provides an HTTP interface for web UI dashboard and debug/streams JSON APIs.
@@ -63,7 +65,7 @@ func NewServer(
 
 	s.httpServer = &http.Server{
 		Addr:         cfg.Listen,
-		Handler:      mux,
+		Handler:      s.authMiddleware(mux),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,
@@ -83,12 +85,41 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/status", s.handleAPIInfo)
 	mux.HandleFunc("/api/codecs", s.handleAPICodecs)
 
-	// Profiling & Debug endpoints
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	// Profiling — disabled by default (enable via http.enable_pprof)
+	if s.config.EnablePprof {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
+}
+
+// authMiddleware enforces an optional API token on all routes when configured.
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	token := strings.TrimSpace(s.config.APIToken)
+	if token == "" {
+		return next
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		provided := r.URL.Query().Get("token")
+		if provided == "" {
+			auth := r.Header.Get("Authorization")
+			if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+				provided = strings.TrimSpace(auth[7:])
+			}
+		}
+		if provided == "" {
+			provided = r.Header.Get("X-Api-Token")
+		}
+		if provided != token {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="sendspin-voip"`)
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Start runs the HTTP listener in the background.
@@ -100,6 +131,8 @@ func (s *Server) Start() error {
 
 	s.logger.Info("HTTP server running and listening",
 		"listen", s.config.Listen,
+		"auth_enabled", strings.TrimSpace(s.config.APIToken) != "",
+		"pprof_enabled", s.config.EnablePprof,
 		"ui_url", fmt.Sprintf("http://localhost%s/", formatPortForURL(s.config.Listen)),
 		"api_streams", fmt.Sprintf("http://localhost%s/api/streams", formatPortForURL(s.config.Listen)),
 	)
@@ -223,54 +256,54 @@ func (s *Server) handleAPICodecs(w http.ResponseWriter, r *http.Request) {
 
 	codecs := []map[string]any{
 		{
-			"codec":            "g722",
-			"name":             "G.722 HD Voice",
-			"sdp_name":         "G722/8000",
-			"rtp_clock_rate":   8000,
+			"codec":             "g722",
+			"name":              "G.722 HD Voice",
+			"sdp_name":          "G722/8000",
+			"rtp_clock_rate":    8000,
 			"audio_sample_rate": 16000,
-			"payload_type":     9,
-			"bitrate_kbps":     64,
-			"channels":         1,
+			"payload_type":      9,
+			"bitrate_kbps":      64,
+			"channels":          1,
 		},
 		{
-			"codec":            "pcmu",
-			"name":             "G.711 µ-law (PCMU)",
-			"sdp_name":         "PCMU/8000",
-			"rtp_clock_rate":   8000,
+			"codec":             "pcmu",
+			"name":              "G.711 µ-law (PCMU)",
+			"sdp_name":          "PCMU/8000",
+			"rtp_clock_rate":    8000,
 			"audio_sample_rate": 8000,
-			"payload_type":     0,
-			"bitrate_kbps":     64,
-			"channels":         1,
+			"payload_type":      0,
+			"bitrate_kbps":      64,
+			"channels":          1,
 		},
 		{
-			"codec":            "pcma",
-			"name":             "G.711 A-law (PCMA)",
-			"sdp_name":         "PCMA/8000",
-			"rtp_clock_rate":   8000,
+			"codec":             "pcma",
+			"name":              "G.711 A-law (PCMA)",
+			"sdp_name":          "PCMA/8000",
+			"rtp_clock_rate":    8000,
 			"audio_sample_rate": 8000,
-			"payload_type":     8,
-			"bitrate_kbps":     64,
-			"channels":         1,
+			"payload_type":      8,
+			"bitrate_kbps":      64,
+			"channels":          1,
 		},
 		{
-			"codec":            "opus",
-			"name":             "Opus Interactive Audio",
-			"sdp_name":         "opus/48000/2",
-			"rtp_clock_rate":   48000,
+			"codec":             "opus",
+			"name":              "Opus Interactive Audio",
+			"sdp_name":          "opus/48000/2",
+			"rtp_clock_rate":    48000,
 			"audio_sample_rate": 48000,
-			"payload_type":     96,
-			"bitrate_kbps":     128,
-			"channels":         2,
+			"payload_type":      96,
+			"bitrate_kbps":      128,
+			"channels":          2,
 		},
 		{
-			"codec":            "l16",
-			"name":             "L16 Linear PCM (Uncompressed)",
-			"sdp_name":         "L16/48000/2",
-			"rtp_clock_rate":   48000,
+			"codec":             "l16",
+			"name":              "L16 Linear PCM (Uncompressed Mono)",
+			"sdp_name":          "L16/48000/1",
+			"rtp_clock_rate":    48000,
 			"audio_sample_rate": 48000,
-			"payload_type":     97,
-			"bitrate_kbps":     1536,
-			"channels":         2,
+			"payload_type":      97,
+			"bitrate_kbps":      768,
+			"channels":          1,
 		},
 	}
 

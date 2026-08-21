@@ -167,3 +167,63 @@ func TestHTTPServer_Endpoints(t *testing.T) {
 		t.Errorf("expected 200 OK for /api/codecs, got %d", rrCodecs.Code)
 	}
 }
+
+func TestHTTPServer_APITokenAuth(t *testing.T) {
+	sipCaller := &dummySIPCaller{}
+	bridge := app.NewBridgeService(
+		nil,
+		app.BridgeConfig{DefaultBufferMode: domain.BufferModeAnnouncement},
+		domain.NewTargetArbiter(""),
+		sipCaller,
+		&dummyRTPStreamer{},
+		&dummyIngress{},
+	)
+
+	srv := NewServer(nil, ServerConfig{
+		Listen:   ":8080",
+		APIToken: "secret-token",
+		Version:  "test",
+	}, bridge, sipCaller)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/info", nil)
+	rr := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token, got %d", rr.Code)
+	}
+
+	reqOK := httptest.NewRequest(http.MethodGet, "/api/info?token=secret-token", nil)
+	rrOK := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rrOK, reqOK)
+	if rrOK.Code != http.StatusOK {
+		t.Fatalf("expected 200 with query token, got %d", rrOK.Code)
+	}
+
+	reqBearer := httptest.NewRequest(http.MethodGet, "/api/info", nil)
+	reqBearer.Header.Set("Authorization", "Bearer secret-token")
+	rrBearer := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rrBearer, reqBearer)
+	if rrBearer.Code != http.StatusOK {
+		t.Fatalf("expected 200 with bearer token, got %d", rrBearer.Code)
+	}
+}
+
+func TestHTTPServer_PprofDisabledByDefault(t *testing.T) {
+	sipCaller := &dummySIPCaller{}
+	bridge := app.NewBridgeService(
+		nil,
+		app.BridgeConfig{},
+		domain.NewTargetArbiter(""),
+		sipCaller,
+		&dummyRTPStreamer{},
+		&dummyIngress{},
+	)
+	srv := NewServer(nil, ServerConfig{Listen: ":8080"}, bridge, sipCaller)
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	rr := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for pprof when disabled, got %d", rr.Code)
+	}
+}

@@ -25,7 +25,9 @@ type AppConfig struct {
 
 // HTTPConfig defines the HTTP server options for web UI and streams debug info.
 type HTTPConfig struct {
-	Listen string `yaml:"listen" json:"listen"` // e.g. ":8080"
+	Listen      string `yaml:"listen" json:"listen"`             // e.g. ":8080"
+	APIToken    string `yaml:"api_token" json:"api_token"`       // If set, required via Authorization: Bearer or ?token=
+	EnablePprof bool   `yaml:"enable_pprof" json:"enable_pprof"` // Expose /debug/pprof (default false)
 }
 
 // SIPConfig defines SIP connectivity options.
@@ -129,7 +131,8 @@ func DefaultConfig() *AppConfig {
 	return &AppConfig{
 		LogLevel: "info",
 		HTTP: HTTPConfig{
-			Listen: ":8080",
+			Listen:      ":8080",
+			EnablePprof: false,
 		},
 		SIP: SIPConfig{
 			Mode:             "pbx",
@@ -165,6 +168,12 @@ func applyEnvOverrides(cfg *AppConfig) {
 			v = ":" + v
 		}
 		cfg.HTTP.Listen = v
+	}
+	if v := os.Getenv("HTTP_API_TOKEN"); v != "" {
+		cfg.HTTP.APIToken = v
+	}
+	if v := os.Getenv("HTTP_ENABLE_PPROF"); v != "" {
+		cfg.HTTP.EnablePprof = strings.EqualFold(v, "true") || v == "1"
 	}
 	if v := os.Getenv("SIP_SERVER"); v != "" {
 		cfg.SIP.Server = v
@@ -231,9 +240,7 @@ func (c *AppConfig) ToDomainPlayerConfigs() ([]domain.PlayerConfig, error) {
 		if err != nil && p.Codec != "" {
 			return nil, fmt.Errorf("player %s: %w", p.ID, err)
 		}
-		if codec == "" {
-			codec = domain.CodecG722
-		}
+		// Empty codec = auto (discovery order); do not force a default.
 
 		bMode, err := domain.ParseBufferMode(p.BufferMode)
 		if err != nil {

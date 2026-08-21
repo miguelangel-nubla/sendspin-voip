@@ -128,6 +128,11 @@ players:
 - **`GET /api/info`**: System metrics, memory usage, goroutines, uptime, and SIP registration status.
 - **`GET /api/codecs`**: Specifications of supported audio codecs (Opus, G.722, PCMU, PCMA, PCM).
 
+Security notes for host-network installs:
+
+- Set `http.api_token` (or `HTTP_API_TOKEN`) to require `Authorization: Bearer <token>`, `X-Api-Token`, or `?token=` on all HTTP routes.
+- `/debug/pprof` is **disabled by default**; only enable with `http.enable_pprof: true` when debugging locally.
+
 ---
 
 ## 🛠️ Supported Hardware & Codecs

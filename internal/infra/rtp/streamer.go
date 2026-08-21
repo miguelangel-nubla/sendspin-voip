@@ -14,20 +14,28 @@ import (
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
 )
 
+// TranscoderFactory creates a fresh audio transcoder for each RTP session.
+// G.722 (and similar) encoders are stateful; sessions must not share them.
+type TranscoderFactory func() app.AudioTranscoderPort
+
 // Streamer implements app.RTPStreamerPort.
 type Streamer struct {
-	logger     *slog.Logger
-	transcoder app.AudioTranscoderPort
-	portMin    int
-	portMax    int
-	mu         sync.Mutex
-	lastPort   int
+	logger            *slog.Logger
+	transcoderFactory TranscoderFactory
+	portMin           int
+	portMax           int
+	mu                sync.Mutex
+	lastPort          int
 }
 
 // NewStreamer creates a new RTP streamer manager.
-func NewStreamer(logger *slog.Logger, transcoder app.AudioTranscoderPort, portMin, portMax int) *Streamer {
+// factory must return a new transcoder instance per call (never a shared stateful encoder).
+func NewStreamer(logger *slog.Logger, factory TranscoderFactory, portMin, portMax int) *Streamer {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if factory == nil {
+		panic("rtp.NewStreamer: transcoder factory is required")
 	}
 	if portMin <= 0 {
 		portMin = 10000
@@ -37,11 +45,11 @@ func NewStreamer(logger *slog.Logger, transcoder app.AudioTranscoderPort, portMi
 	}
 
 	return &Streamer{
-		logger:     logger,
-		transcoder: transcoder,
-		portMin:    portMin,
-		portMax:    portMax,
-		lastPort:   portMin,
+		logger:            logger,
+		transcoderFactory: factory,
+		portMin:           portMin,
+		portMax:           portMax,
+		lastPort:          portMin,
 	}
 }
 
@@ -87,15 +95,20 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 	_, _ = rand.Read(ssrcBytes[:])
 	ssrc := binary.BigEndian.Uint32(ssrcBytes[:])
 
+	activeCodec := codec
+	if activeCodec == "" {
+		activeCodec = domain.CodecG722
+	}
+
 	sess := &Session{
-		logger:     s.logger,
-		transcoder: s.transcoder,
-		conn:       conn,
-		localPort:  localPort,
-		codec:      codec,
-		ssrc:       ssrc,
-		seq:        1,
-		timestamp:  1000,
+		logger:                    s.logger,
+		transcoder:                s.transcoderFactory(),
+		conn:                      conn,
+		localPort:                 localPort,
+		codec:                     activeCodec,
+		ssrc:                      ssrc,
+		seq:                       1,
+		timestamp:                 1000,
 		audioQueue:                make(chan []byte, 1000), // 20ms packet buffer (up to 20s, prevents dropping bursts)
 		stopChan:                  make(chan struct{}),
 		isFirstPacketAfterSilence: true,
@@ -169,7 +182,15 @@ func (s *Session) StartTransmission(remoteAddr *net.UDPAddr) error {
 func (s *Session) SetCodec(codec domain.Codec) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if codec == "" || codec == s.codec {
+		return
+	}
 	s.codec = codec
+	s.pcmBuffer = nil
+	s.isFirstPacketAfterSilence = true
+	if resetter, ok := s.transcoder.(interface{ Reset() }); ok {
+		resetter.Reset()
+	}
 }
 
 // 20ms packet pacer ticker loop (50 packets per second).

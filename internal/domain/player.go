@@ -76,9 +76,11 @@ func NewPlayer(cfg PlayerConfig) (*Player, error) {
 	if cfg.SIPTarget == "" {
 		return nil, fmt.Errorf("player %q requires a sip_target", cfg.ID)
 	}
-	if cfg.Codec == "" {
-		cfg.Codec = CodecG722
+	cfg.SIPTarget = NormalizeSIPTarget(cfg.SIPTarget)
+	if cfg.SIPTarget == "" || cfg.SIPTarget == "sip:" {
+		return nil, fmt.Errorf("player %q requires a valid sip_target", cfg.ID)
 	}
+	// Empty Codec means "auto": use downstream discovery order (no forced preference).
 	if cfg.BufferMode == "" {
 		cfg.BufferMode = BufferModeAnnouncement
 	}

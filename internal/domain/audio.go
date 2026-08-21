@@ -26,34 +26,47 @@ var DefaultCodecPreferences = []Codec{
 	CodecPCMA,
 }
 
-// PrioritizeCodecs returns an ordered codec list with preferred codec first (if set) followed by available codecs without duplicates.
+// PrioritizeCodecs returns an ordered codec list.
+// If preferred is set AND present in available, it is moved to the front.
+// Preferred is never injected when it was not discovered/advertised in available.
+// If available is empty/nil, DefaultCodecPreferences is used (preferred still only moves to front if listed there).
 func PrioritizeCodecs(preferred Codec, available []Codec) []Codec {
 	base := available
 	if len(base) == 0 {
 		base = DefaultCodecPreferences
 	}
-	if preferred == "" {
-		res := make([]Codec, len(base))
-		copy(res, base)
+
+	res := make([]Codec, 0, len(base))
+	seen := make(map[Codec]bool, len(base))
+	for _, c := range base {
+		if c == "" || seen[c] {
+			continue
+		}
+		res = append(res, c)
+		seen[c] = true
+	}
+
+	if preferred == "" || !seen[preferred] {
 		return res
 	}
 
-	result := []Codec{preferred}
-	seen := map[Codec]bool{preferred: true}
-	for _, c := range base {
-		if !seen[c] {
-			result = append(result, c)
-			seen[c] = true
+	// Move preferred to front without adding undiscovered codecs.
+	out := make([]Codec, 0, len(res))
+	out = append(out, preferred)
+	for _, c := range res {
+		if c != preferred {
+			out = append(out, c)
 		}
 	}
-	return result
+	return out
 }
 
 // ParseCodec normalizes and parses a codec string.
+// "auto", "best", and empty string return an empty Codec (no preference — use discovery order).
 func ParseCodec(s string) (Codec, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "auto", "best", "":
-		return CodecOpus, nil
+		return "", nil
 	case "pcmu", "g711u", "ulaw", "u-law", "g711_ulaw":
 		return CodecPCMU, nil
 	case "pcma", "g711a", "alaw", "a-law", "g711_alaw":
@@ -67,6 +80,19 @@ func ParseCodec(s string) (Codec, error) {
 	default:
 		return "", fmt.Errorf("unsupported codec: %s (supported: auto, opus, l16, g722, pcmu, pcma)", s)
 	}
+}
+
+// NormalizeSIPTarget canonicalizes a SIP URI for arbiter keying and comparisons.
+func NormalizeSIPTarget(target string) string {
+	t := strings.TrimSpace(strings.ToLower(target))
+	t = strings.Trim(t, "<>")
+	t = strings.TrimPrefix(t, "sips:")
+	t = strings.TrimPrefix(t, "sip:")
+	t = strings.TrimSpace(t)
+	if t == "" {
+		return ""
+	}
+	return "sip:" + t
 }
 
 // PayloadType returns the standard RFC RTP payload type for the codec.

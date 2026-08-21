@@ -59,7 +59,7 @@ func NewCaller(logger *slog.Logger, cfg CallerConfig) (*Caller, error) {
 
 	localIP := cfg.LocalIP
 	if localIP == "" {
-		localIP = detectOutboundIP().String()
+		localIP = detectOutboundIP(cfg.Server).String()
 	}
 
 	return &Caller{
@@ -531,13 +531,62 @@ func (c *Caller) buildAutoAnswerHeaders(preset domain.AutoAnswerPreset, custom s
 	return headers
 }
 
-func detectOutboundIP() net.IP {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		return net.ParseIP("127.0.0.1")
+func detectOutboundIP(sipServer string) net.IP {
+	// Prefer routing toward the configured SIP server (works on air-gapped LANs).
+	candidates := make([]string, 0, 3)
+	if sipServer != "" {
+		host := sipServer
+		if h, _, err := net.SplitHostPort(sipServer); err == nil {
+			host = h
+		}
+		if host != "" {
+			candidates = append(candidates, net.JoinHostPort(host, "5060"))
+		}
 	}
-	defer conn.Close()
-	return conn.LocalAddr().(*net.UDPAddr).IP
+	candidates = append(candidates, "1.1.1.1:80", "8.8.8.8:80")
+
+	for _, dest := range candidates {
+		conn, err := net.DialTimeout("udp", dest, 500*time.Millisecond)
+		if err != nil {
+			continue
+		}
+		ip := conn.LocalAddr().(*net.UDPAddr).IP
+		_ = conn.Close()
+		if ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+			return ip
+		}
+	}
+
+	// Fall back to first non-loopback IPv4 on a private interface
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				var ip net.IP
+				switch v := addr.(type) {
+				case *net.IPNet:
+					ip = v.IP
+				case *net.IPAddr:
+					ip = v.IP
+				}
+				if ip == nil || ip.IsLoopback() {
+					continue
+				}
+				if v4 := ip.To4(); v4 != nil {
+					return v4
+				}
+			}
+		}
+	}
+
+	return net.ParseIP("127.0.0.1")
 }
 
 // DialogWrapper wraps sipgo.DialogClientSession to implement app.SIPDialog.

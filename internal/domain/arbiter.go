@@ -18,7 +18,7 @@ const (
 type TargetArbiter struct {
 	mu             sync.Mutex
 	policy         ConflictPolicy
-	activeSessions map[string]*CallSession // keyed by normalized SIPTarget
+	activeSessions map[string]*CallSession // keyed by NormalizeSIPTarget(SIPTarget)
 }
 
 // NewTargetArbiter creates a new target arbiter.
@@ -91,7 +91,7 @@ func (a *TargetArbiter) GetActiveSession(target string) (*CallSession, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	sess, exists := a.activeSessions[target]
+	sess, exists := a.activeSessions[NormalizeSIPTarget(target)]
 	if exists && sess.GetState() != StateTerminated {
 		return sess, true
 	}

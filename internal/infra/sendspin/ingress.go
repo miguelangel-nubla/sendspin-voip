@@ -42,6 +42,10 @@ type playerWorker struct {
 	currentMeta     domain.StreamMetadata
 	chunksReceived  uint64
 	bytesReceived   uint64
+
+	// clockOffsetUs maps Sendspin server timestamps to local wall clock (PlayAt).
+	clockOffsetUs int64
+	clockSynced   bool
 }
 
 // Ingress implements app.PlayerIngressPort using Sendspin wire protocol.
@@ -122,12 +126,37 @@ func (ing *Ingress) runDiscovery() {
 			ing.logger.Info("Discovered Sendspin server via mDNS", "name", srv.Name, "address", addr)
 
 			ing.mu.Lock()
-			if ing.serverAddr == "" {
+			prev := ing.serverAddr
+			if prev == "" {
 				ing.serverAddr = addr
 				ing.mu.Unlock()
 				select {
 				case ing.discoveredCh <- addr:
 				default:
+				}
+			} else if prev != addr {
+				// Allow failover when current server is not connected
+				allDown := true
+				for _, w := range ing.workers {
+					w.statsMu.RLock()
+					connected := w.connected
+					w.statsMu.RUnlock()
+					if connected {
+						allDown = false
+						break
+					}
+				}
+				if allDown {
+					ing.logger.Info("Switching Sendspin server after mDNS rediscovery",
+						"from", prev, "to", addr)
+					ing.serverAddr = addr
+					ing.mu.Unlock()
+					select {
+					case ing.discoveredCh <- addr:
+					default:
+					}
+				} else {
+					ing.mu.Unlock()
 				}
 			} else {
 				ing.mu.Unlock()
@@ -302,6 +331,8 @@ func (ing *Ingress) SendPauseToUpstream(playerID string) {
 }
 
 func (ing *Ingress) runPlayerClient(w *playerWorker) {
+	consecutiveFails := 0
+
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -345,10 +376,16 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		})
 
 		if err := client.Connect(); err != nil {
-			ing.logger.Warn("Failed to connect to Sendspin server, retrying in 3s", "player_id", w.cfg.ID, "err", err)
+			consecutiveFails++
+			ing.logger.Warn("Failed to connect to Sendspin server, retrying in 3s",
+				"player_id", w.cfg.ID, "err", err, "fails", consecutiveFails)
+			if consecutiveFails >= 3 && strings.EqualFold(ing.config.Server, "auto") {
+				ing.clearServerAddr(serverAddr)
+			}
 			time.Sleep(3 * time.Second)
 			continue
 		}
+		consecutiveFails = 0
 
 		var primaryCodec = "opus"
 		var primaryRate = 48000
@@ -376,6 +413,8 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		w.currentChannels = primaryChannels
 		w.currentBitDepth = primaryBitDepth
 		w.offeredFormats = offeredFormats
+		w.clockSynced = false
+		w.clockOffsetUs = 0
 		w.statsMu.Unlock()
 
 		w.client = client
@@ -423,6 +462,8 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				w.currentRate = currentRate
 				w.currentChannels = currentChannels
 				w.currentBitDepth = currentBitDepth
+				w.clockSynced = false
+				w.clockOffsetUs = 0
 				w.statsMu.Unlock()
 
 				if currentChannels > 0 && (currentChannels == 1 || currentChannels == 2) {
@@ -492,6 +533,8 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				w.bytesReceived += uint64(len(chunk.Data))
 				w.statsMu.Unlock()
 
+				playAt := resolvePlayAt(w, chunk.Timestamp)
+
 				if currentCodec == "opus" {
 					var samples []int32
 					n, err := opusDecoder.DecodeToInt16(chunk.Data, pcm16Buf)
@@ -503,7 +546,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					}
 					audioChunk := domain.AudioChunk{
 						Timestamp:  chunk.Timestamp,
-						PlayAt:     time.Now(),
+						PlayAt:     playAt,
 						OpusData:   chunk.Data,
 						Samples:    samples,
 						SampleRate: 48000,
@@ -515,7 +558,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					samples := decodePCM(chunk.Data, currentBitDepth)
 					audioChunk := domain.AudioChunk{
 						Timestamp:  chunk.Timestamp,
-						PlayAt:     time.Now(),
+						PlayAt:     playAt,
 						Samples:    samples,
 						SampleRate: currentRate,
 						Channels:   currentChannels,
@@ -530,7 +573,34 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		w.connected = false
 		w.statsMu.Unlock()
 		client.Close()
+		consecutiveFails++
+		if consecutiveFails >= 3 && strings.EqualFold(ing.config.Server, "auto") {
+			ing.clearServerAddr(serverAddr)
+		}
 		time.Sleep(2 * time.Second)
+	}
+}
+
+func resolvePlayAt(w *playerWorker, serverTS int64) time.Time {
+	now := time.Now()
+	if serverTS <= 0 {
+		return now
+	}
+	w.statsMu.Lock()
+	defer w.statsMu.Unlock()
+	if !w.clockSynced {
+		w.clockOffsetUs = now.UnixMicro() - serverTS
+		w.clockSynced = true
+	}
+	return time.UnixMicro(serverTS + w.clockOffsetUs)
+}
+
+func (ing *Ingress) clearServerAddr(current string) {
+	ing.mu.Lock()
+	defer ing.mu.Unlock()
+	if ing.serverAddr == current {
+		ing.logger.Info("Clearing Sendspin server address to allow mDNS rediscovery", "was", current)
+		ing.serverAddr = ""
 	}
 }
 
