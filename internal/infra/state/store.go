@@ -48,6 +48,13 @@ func (s *FileStore) load() error {
 		return fmt.Errorf("failed to unmarshal state file %s: %w", s.filePath, err)
 	}
 
+	// A state file containing JSON "null" (or an empty file that a crashed write
+	// left behind) unmarshals into a nil map. Assigning that would make the very
+	// next SetPlayerState panic with "assignment to entry in nil map".
+	if loaded == nil {
+		loaded = make(map[string]app.PlayerStateRecord)
+	}
+
 	s.states = loaded
 	return nil
 }
