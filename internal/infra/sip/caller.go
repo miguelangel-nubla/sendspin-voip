@@ -347,7 +347,10 @@ func (c *Caller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Co
 		}
 	}
 
-	if res.StatusCode >= 400 && res.StatusCode != 486 && res.StatusCode != 200 {
+	// 486 Busy Here still proves the endpoint is reachable, so treat it as a
+	// successful probe. (The `!= 200` that used to be part of this condition was
+	// dead: a status cannot be both >= 400 and 200.)
+	if res.StatusCode >= 400 && res.StatusCode != 486 {
 		return nil, fmt.Errorf("target returned status %d %s", res.StatusCode, res.Reason)
 	}
 

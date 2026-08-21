@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -63,12 +64,22 @@ func NewServer(
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
+	// pprof's CPU profile and execution trace endpoints stream for their whole
+	// duration (30s by default), so a blanket WriteTimeout truncates them and
+	// hands back a corrupt profile. Relax the write deadline when pprof is on
+	// and keep the header read deadline either way.
+	writeTimeout := 10 * time.Second
+	if cfg.EnablePprof {
+		writeTimeout = 0
+	}
+
 	s.httpServer = &http.Server{
-		Addr:         cfg.Listen,
-		Handler:      s.authMiddleware(mux),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  30 * time.Second,
+		Addr:              cfg.Listen,
+		Handler:           s.authMiddleware(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       30 * time.Second,
 	}
 
 	return s
@@ -113,7 +124,10 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		if provided == "" {
 			provided = r.Header.Get("X-Api-Token")
 		}
-		if provided != token {
+		// Constant-time compare: a byte-by-byte `!=` leaks the length of the
+		// matching prefix through timing, which is enough to recover a token
+		// over a LAN given that this endpoint is unrated-limited.
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="sendspin-voip"`)
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
