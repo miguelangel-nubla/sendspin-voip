@@ -115,7 +115,10 @@ func (m *mockRTPSession) StartTransmission(remoteAddr *net.UDPAddr) error {
 	m.startedAddr = remoteAddr
 	return nil
 }
-func (m *mockRTPSession) SetCodec(codec domain.Codec) {}
+func (m *mockRTPSession) SetCodec(codec domain.Codec)          {}
+func (m *mockRTPSession) SetBufferMode(mode domain.BufferMode) {}
+func (m *mockRTPSession) SetAnswered(answered bool)            {}
+func (m *mockRTPSession) SetVolume(volumePercent int)          {}
 func (m *mockRTPSession) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

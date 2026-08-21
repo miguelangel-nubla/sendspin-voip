@@ -30,20 +30,28 @@ type RTPStats struct {
 	BytesSent   uint64       `json:"bytes_sent"`
 
 	// Live audio path (updated on each PushAudio)
-	PathMode            string   `json:"path_mode,omitempty"` // "opus_passthrough" | "transcode" | "idle"
-	PathSummary         string   `json:"path_summary,omitempty"`
-	PathStages          []string `json:"path_stages,omitempty"`
-	PathVolumePercent   int      `json:"path_volume_percent"`
-	PathIngressCodec    string   `json:"path_ingress_codec,omitempty"`
-	PathIngressRate     int      `json:"path_ingress_rate,omitempty"`
-	PathIngressChannels int      `json:"path_ingress_channels,omitempty"`
-	PassthroughPackets  uint64   `json:"passthrough_packets"`
-	TranscodePackets    uint64   `json:"transcode_packets"`
+	PathMode            string            `json:"path_mode,omitempty"` // "opus_passthrough" | "transcode" | "idle"
+	PathSummary         string            `json:"path_summary,omitempty"`
+	PathStages          []string          `json:"path_stages,omitempty"`
+	PathVolumePercent   int               `json:"path_volume_percent"`
+	PathIngressCodec    string            `json:"path_ingress_codec,omitempty"`
+	PathIngressRate     int               `json:"path_ingress_rate,omitempty"`
+	PathIngressChannels int               `json:"path_ingress_channels,omitempty"`
+	PassthroughPackets  uint64            `json:"passthrough_packets"`
+	TranscodePackets    uint64            `json:"transcode_packets"`
+	UpstreamChunks      int               `json:"upstream_chunks"`
+	ConversionQueue     int               `json:"conversion_queue"`
+	UpstreamPlayAtStart time.Time         `json:"upstream_play_at_start,omitempty"`
+	UpstreamPlayAtEnd   time.Time         `json:"upstream_play_at_end,omitempty"`
+	ReadyPlayAtStart    time.Time         `json:"ready_play_at_start,omitempty"`
+	ReadyPlayAtEnd      time.Time         `json:"ready_play_at_end,omitempty"`
+	BufferMode          domain.BufferMode `json:"buffer_mode,omitempty"`
+	Answered            bool              `json:"answered"`
 }
 
 // AudioPathDebugInfo describes the end-to-end processing pipeline for a stream.
 type AudioPathDebugInfo struct {
-	Mode               string   `json:"mode"` // idle | buffering | opus_passthrough | transcode
+	Mode               string   `json:"mode"` // idle | buffering | opus_passthrough | transcode | dialing
 	Summary            string   `json:"summary"`
 	Stages             []string `json:"stages"`
 	Passthrough        bool     `json:"passthrough"`
@@ -55,8 +63,17 @@ type AudioPathDebugInfo struct {
 	EgressFormat       string   `json:"egress_format,omitempty"`
 	BufferMode         string   `json:"buffer_mode,omitempty"`
 	PreAnswerBuffered  int      `json:"pre_answer_buffered,omitempty"`
+	UpstreamChunks     int      `json:"upstream_chunks,omitempty"`
+	ConversionQueue    int      `json:"conversion_queue,omitempty"`
 	PassthroughPackets uint64   `json:"passthrough_packets,omitempty"`
 	TranscodePackets   uint64   `json:"transcode_packets,omitempty"`
+	BufferStartSec     float64  `json:"buffer_start_sec,omitempty"`
+	BufferEndSec       float64  `json:"buffer_end_sec,omitempty"`
+	ReadyStartSec      float64  `json:"ready_start_sec,omitempty"`
+	ReadyEndSec        float64  `json:"ready_end_sec,omitempty"`
+	HoldBackStartSec   float64  `json:"holdback_start_sec,omitempty"`
+	HoldBackEndSec     float64  `json:"holdback_end_sec,omitempty"`
+	PlayheadSec        float64  `json:"playhead_sec,omitempty"`
 }
 
 // IngressPlayerStats represents runtime metrics for a Sendspin ingress connection.
@@ -68,6 +85,7 @@ type IngressPlayerStats struct {
 	Channels       int                   `json:"channels"`
 	BitDepth       int                   `json:"bit_depth"`
 	OfferedFormats []string              `json:"offered_formats,omitempty"`
+	ExposedCodecs  []string              `json:"exposed_codecs,omitempty"`
 	Metadata       domain.StreamMetadata `json:"metadata"`
 	ChunksReceived uint64                `json:"chunks_received"`
 	BytesReceived  uint64                `json:"bytes_received"`
@@ -84,27 +102,31 @@ type ProducerDebugInfo struct {
 	Channels       int      `json:"channels"`
 	BitDepth       int      `json:"bit_depth"`
 	BitrateKbps    int      `json:"bitrate_kbps,omitempty"`
-	OfferedFormats []string `json:"offered_formats,omitempty"` // e.g. ["PCM 16000Hz 1ch 16bit", "PCM 48000Hz 2ch 16bit"]
-	State          string   `json:"state"`
-	Track          string   `json:"track,omitempty"`
-	Artist         string   `json:"artist,omitempty"`
-	Title          string   `json:"title,omitempty"`
-	Album          string   `json:"album,omitempty"`
-	AlbumArtist    string   `json:"album_artist,omitempty"`
-	ChunksReceived uint64   `json:"chunks_received"`
-	BytesReceived  uint64   `json:"bytes_received"`
+	OfferedFormats   []string `json:"offered_formats,omitempty"` // e.g. ["PCM 16000Hz 1ch 16bit", "PCM 48000Hz 2ch 16bit"]
+	ExposedCodecs    []string `json:"exposed_codecs,omitempty"`  // e.g. ["opus", "pcm"]
+	State            string   `json:"state"`
+	Track            string   `json:"track,omitempty"`
+	Artist           string   `json:"artist,omitempty"`
+	Title            string   `json:"title,omitempty"`
+	Album            string   `json:"album,omitempty"`
+	AlbumArtist      string   `json:"album_artist,omitempty"`
+	TrackDurationSec float64  `json:"track_duration_sec,omitempty"`
+	TrackProgressSec float64  `json:"track_progress_sec,omitempty"`
+	ChunksReceived   uint64   `json:"chunks_received"`
+	BytesReceived    uint64   `json:"bytes_received"`
 }
 
 // ConsumerDebugInfo details the downstream SIP/RTP egress destination.
 type ConsumerDebugInfo struct {
-	Type           string   `json:"type"` // "SIP/RTP Egress"
-	URL            string   `json:"url"`  // e.g. "sip:8003@asterisk.local.myol.es"
-	CallID         string   `json:"call_id,omitempty"`
-	State          string   `json:"state"`
-	ConfigCodec    string   `json:"config_codec"`
-	ActiveCodec    string   `json:"active_codec"`
-	OfferedCodecs  []string `json:"offered_codecs,omitempty"`
-	NegotiatedSDP  string   `json:"negotiated_sdp,omitempty"`
+	Type             string   `json:"type"` // "SIP/RTP Egress"
+	URL              string   `json:"url"`  // e.g. "sip:8003@asterisk.local.myol.es"
+	CallID           string   `json:"call_id,omitempty"`
+	State            string   `json:"state"`
+	ConfigCodec      string   `json:"config_codec"`
+	ActiveCodec      string   `json:"active_codec"`
+	DiscoveredCodecs []string `json:"discovered_codecs,omitempty"` // Discovered via SIP OPTIONS probe
+	OfferedCodecs    []string `json:"offered_codecs,omitempty"`    // SDP Codecs offered in INVITE
+	NegotiatedSDP    string   `json:"negotiated_sdp,omitempty"`
 	RTPClockRate   uint32   `json:"rtp_clock_rate,omitempty"`
 	PayloadType    uint8    `json:"payload_type,omitempty"`
 	Format         string   `json:"format"` // e.g. "G.722 16000Hz 1ch (64 kbps)"
@@ -179,9 +201,15 @@ type RTPSession interface {
 	StartTransmission(remoteAddr *net.UDPAddr) error
 	// SetCodec updates the transmission codec if negotiated dynamically via SDP answer.
 	SetCodec(codec domain.Codec)
-	// PushAudio sends raw PCM samples (int32) into the transcoder and RTP pacer.
+	// SetBufferMode updates the playout buffering mode (announcement vs live).
+	SetBufferMode(mode domain.BufferMode)
+	// SetAnswered sets whether the SIP call has been answered.
+	SetAnswered(answered bool)
+	// SetVolume updates the gain level and flushes converted frames while preserving raw upstream audio.
+	SetVolume(volumePercent int)
+	// PushAudio sends raw audio chunks from Sendspin into the Upstream stage.
 	PushAudio(chunk domain.AudioChunk, volumePercent int) error
-	// ClearBuffer flushes any buffered PCM samples and queued RTP packets (e.g. on seek).
+	// ClearBuffer flushes all 3 stages (Upstream, Conversion, Downstream) on seek / stream clear.
 	ClearBuffer()
 	// DrainAndClose waits for drainDelay then closes the RTP socket.
 	DrainAndClose(drainDelay time.Duration) error
@@ -193,6 +221,8 @@ type RTPSession interface {
 type AudioTranscoderPort interface {
 	// Transcode converts incoming PCM samples to the target codec payload.
 	Transcode(samples []int32, srcRate int, srcChannels int, dstCodec domain.Codec, volumePercent int) ([]byte, error)
+	// DecodeOpusToPCM decodes native Opus data to 48kHz PCM samples.
+	DecodeOpusToPCM(opusData []byte, channels int) ([]int32, error)
 }
 
 // PlayerIngressPort defines the interface for managing Sendspin client connections to Music Assistant.

@@ -70,6 +70,7 @@ type PlayerConfig struct {
 	CustomAutoAnswerHeader string           `yaml:"custom_auto_answer_header" json:"custom_auto_answer_header"`
 	Priority               int              `yaml:"priority" json:"priority"` // Higher priority preempts lower
 	DefaultVolume          int              `yaml:"default_volume" json:"default_volume"`
+	PreAnswerBufferSec     int              `yaml:"pre_answer_buffer_sec" json:"pre_answer_buffer_sec"`
 }
 
 // Player represents the state of a registered virtual player.

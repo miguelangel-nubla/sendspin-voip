@@ -22,11 +22,12 @@ const (
 
 // BridgeConfig contains global operational parameters for the bridge.
 type BridgeConfig struct {
-	DefaultBufferMode domain.BufferMode
-	PickupBufferMs    int
-	DrainDelayMs      int
-	IdleHangupDelayMs int
-	ConflictPolicy    domain.ConflictPolicy
+	DefaultBufferMode  domain.BufferMode
+	PickupBufferMs     int
+	DrainDelayMs       int
+	IdleHangupDelayMs  int
+	PreAnswerBufferSec int
+	ConflictPolicy     domain.ConflictPolicy
 }
 
 type activeCallState struct {
@@ -37,11 +38,11 @@ type activeCallState struct {
 
 	mu     sync.Mutex
 	dialog SIPDialog
-	buffer []domain.AudioChunk
 
-	answered    bool
-	done        chan struct{}
-	lingerTimer *time.Timer
+	answered               bool
+	done                   chan struct{}
+	lingerTimer            *time.Timer
+	streamStartProgressSec float64
 	// lingerGen is bumped whenever a linger timer is armed or cancelled. A timer
 	// callback that already fired and is blocked on mu compares the generation it
 	// captured, so a stale expiry can never tear down a freshly armed call.
@@ -268,7 +269,6 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 			} else {
 				call.cancelLingerLocked()
 				call.session.Metadata = meta
-				call.buffer = nil
 				call.mu.Unlock()
 
 				if call.rtpSession != nil {
@@ -337,7 +337,7 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		s.terminatePlayerCallSync(preempted.PlayerID, false, 500*time.Millisecond)
 	}
 
-	// 3. Allocate local RTP socket
+	// 3. Allocate local RTP socket with 3-stage pipeline
 	rtpSess, err := s.rtpStreamer.CreateSession(playerCfg.Codec)
 	if err != nil {
 		s.logger.Error("Failed to create RTP session", "err", err)
@@ -345,11 +345,31 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		return
 	}
 
+	s.playersMu.RLock()
+	volume := 100
+	if p, ok := s.players[playerID]; ok {
+		volume = p.Volume
+		if p.IsMuted {
+			volume = 0
+		}
+	}
+	s.playersMu.RUnlock()
+
+	rtpSess.SetBufferMode(effectiveMode)
+	rtpSess.SetVolume(volume)
+
+	startProgSec := float64(meta.ProgressMs) / 1000.0
+	if startProgSec <= 0 {
+		if stats, ok := s.ingress.GetPlayerStats(playerID); ok && stats.Metadata.ProgressMs > 0 {
+			startProgSec = float64(stats.Metadata.ProgressMs) / 1000.0
+		}
+	}
+
 	callState := &activeCallState{
-		session:    session,
-		rtpSession: rtpSess,
-		buffer:     make([]domain.AudioChunk, 0, 64),
-		done:       make(chan struct{}),
+		session:                session,
+		rtpSession:             rtpSess,
+		done:                   make(chan struct{}),
+		streamStartProgressSec: startProgSec,
 	}
 	s.activeCalls.Store(playerID, callState)
 
@@ -395,45 +415,23 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 		activeCodec = negotiated
 	}
 
+	call.rtpSession.SetBufferMode(session.EffectiveMod)
+
 	if err := call.rtpSession.StartTransmission(remoteRTP); err != nil {
 		s.logger.Error("Failed to start RTP transmission", "player_id", cfg.ID, "err", err)
 		s.terminatePlayerCall(cfg.ID, true)
 		return
 	}
 
+	call.mu.Lock()
+	call.answered = true
+	call.mu.Unlock()
+
 	s.logger.Info("SIP call connected & streaming RTP",
 		"player_id", cfg.ID,
 		"remote_rtp", remoteRTP.String(),
 		"codec", activeCodec,
 	)
-
-	// Flush buffered audio if in Announcement mode under lock before setting answered=true
-	call.mu.Lock()
-	var preBuffer []domain.AudioChunk
-	if session.EffectiveMod == domain.BufferModeAnnouncement {
-		preBuffer = call.buffer
-		call.buffer = nil
-	} else {
-		call.buffer = nil
-	}
-
-	s.playersMu.RLock()
-	volume := 100
-	if p, ok := s.players[cfg.ID]; ok {
-		volume = p.Volume
-		if p.IsMuted {
-			volume = 0
-		}
-	}
-	s.playersMu.RUnlock()
-
-	for _, chunk := range preBuffer {
-		if err := call.rtpSession.PushAudio(chunk, volume); err != nil {
-			s.logger.Debug("Error pushing buffered audio chunk", "err", err)
-		}
-	}
-	call.answered = true
-	call.mu.Unlock()
 
 	// Listen for remote hangup (phone physically hung up)
 	select {
@@ -450,14 +448,10 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 func (s *BridgeService) OnStreamClear(playerID string) {
 	if val, ok := s.activeCalls.Load(playerID); ok {
 		call := val.(*activeCallState)
-		call.mu.Lock()
-		call.buffer = nil
-		call.mu.Unlock()
-
 		if call.rtpSession != nil {
 			call.rtpSession.ClearBuffer()
 		}
-		s.logger.Debug("Flushed audio buffer on stream clear", "player_id", playerID)
+		s.logger.Debug("Flushed audio pipeline buffers on stream clear", "player_id", playerID)
 	}
 }
 
@@ -487,36 +481,7 @@ func (s *BridgeService) OnAudioChunk(playerID string, chunk domain.AudioChunk) {
 		return
 	}
 	call := val.(*activeCallState)
-
-	call.mu.Lock()
-	call.cancelLingerLocked()
-	answered := call.answered
-	if !answered {
-		if call.session.EffectiveMod == domain.BufferModeAnnouncement {
-			// Ring buffer: drop oldest chunks when full so TTS start is preserved after long dials
-			maxCapacity := (s.config.PickupBufferMs / 20) + 10 // ~50 chunks per sec at 20ms
-			if maxCapacity < 1 {
-				maxCapacity = 1
-			}
-			if len(call.buffer) >= maxCapacity {
-				// Drop oldest: shift left by keeping the newest maxCapacity-1, then append
-				call.buffer = append(call.buffer[1:], chunk)
-			} else {
-				call.buffer = append(call.buffer, chunk)
-			}
-		}
-		call.mu.Unlock()
-		return
-	}
-	mode := call.session.EffectiveMod
-	call.mu.Unlock()
-
-	// Live mode: drop chunks that arrived too late relative to Sendspin PlayAt
-	if mode == domain.BufferModeLive && !chunk.PlayAt.IsZero() {
-		if late := time.Since(chunk.PlayAt); late > 100*time.Millisecond {
-			return
-		}
-	}
+	call.cancelLinger()
 
 	s.playersMu.RLock()
 	volume := 100
@@ -552,11 +517,7 @@ func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 	}
 	call := val.(*activeCallState)
 
-	// Instantly clear any queued audio frames so playback stops immediately with 0ms delay
-	call.mu.Lock()
-	call.buffer = nil
-	call.mu.Unlock()
-
+	// Instantly clear any queued audio frames across all 3 stages
 	if call.rtpSession != nil {
 		call.rtpSession.ClearBuffer()
 	}
@@ -595,10 +556,9 @@ func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 	call.mu.Unlock()
 }
 
-// OnVolumeChange updates player volume gain. After the SIP call is answered,
-// the RTP pacer queue is flushed so the new level applies immediately.
-// The pre-answer announcement buffer (call.buffer) is left intact — those
-// chunks are still raw PCM/Opus and get the current volume when flushed on answer.
+// OnVolumeChange updates player volume gain. The Conversion ready queue
+// is flushed so the new level applies immediately, while the raw Upstream
+// buffer is left intact.
 func (s *BridgeService) OnVolumeChange(playerID string, volume int) {
 	if volume > 100 {
 		volume = 100
@@ -642,15 +602,20 @@ func (s *BridgeService) OnMuteChange(playerID string, muted bool) {
 }
 
 func (s *BridgeService) flushActiveRTPBuffer(playerID string) {
+	s.playersMu.RLock()
+	volume := 100
+	if p, ok := s.players[playerID]; ok {
+		volume = p.Volume
+		if p.IsMuted {
+			volume = 0
+		}
+	}
+	s.playersMu.RUnlock()
+
 	if val, ok := s.activeCalls.Load(playerID); ok {
 		call := val.(*activeCallState)
-		call.mu.Lock()
-		answered := call.answered
-		rtp := call.rtpSession
-		call.mu.Unlock()
-		// Only flush RTP after answer; never touch call.buffer (announcement hold)
-		if answered && rtp != nil {
-			rtp.ClearBuffer()
+		if call.rtpSession != nil {
+			call.rtpSession.SetVolume(volume)
 		}
 	}
 }
@@ -706,19 +671,17 @@ func (s *BridgeService) terminatePlayerCall(playerID string, releaseArbiter bool
 	call.session.Close()
 
 	go func() {
-		// 1. Drain RTP jitter buffer
-		if call.rtpSession != nil {
-			_ = call.rtpSession.DrainAndClose(call.session.DrainDelay)
-		}
-
-		// 2. Send SIP BYE
 		if dialog := call.getDialog(); dialog != nil {
 			byeCtx, cancel := context.WithTimeout(context.Background(), shutdownByeTimeout)
-			defer cancel()
 			_ = dialog.Bye(byeCtx)
+			cancel()
 		}
 
-		// 3. Release arbiter target
+		drainDelay := time.Duration(s.config.DrainDelayMs) * time.Millisecond
+		if call.rtpSession != nil {
+			_ = call.rtpSession.DrainAndClose(drainDelay)
+		}
+
 		if releaseArbiter {
 			s.arbiter.ReleaseTarget(call.session)
 		}
@@ -770,81 +733,68 @@ func (s *BridgeService) GetStreamsDebugInfo() map[string]StreamDebugInfo {
 
 	result := make(map[string]StreamDebugInfo, len(players))
 	for _, p := range players {
-		result[p.Config.ID] = s.buildStreamDebugInfo(p)
+		if info, ok := s.GetStreamDebugInfo(p.Config.ID); ok {
+			result[p.Config.ID] = info
+		}
 	}
 	return result
 }
 
-// GetStreamDebugInfo returns debug information for a specific player stream.
-func (s *BridgeService) GetStreamDebugInfo(playerID string) (StreamDebugInfo, bool) {
+// GetStreamDebugInfo compiles real-time diagnostics for a virtual player stream.
+func (s *BridgeService) GetStreamDebugInfo(id string) (StreamDebugInfo, bool) {
 	s.playersMu.RLock()
-	p, ok := s.players[playerID]
-	s.playersMu.RUnlock()
-
-	if !ok {
+	player, exists := s.players[id]
+	if !exists {
+		s.playersMu.RUnlock()
 		return StreamDebugInfo{}, false
 	}
-	return s.buildStreamDebugInfo(p), true
-}
-
-func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
-	s.playersMu.RLock()
-	id := p.Config.ID
-	name := p.Config.Name
-	isPlaying := p.IsPlaying
-	isGrouped := p.IsGrouped
-	vol := p.Volume
-	muted := p.IsMuted
-	cfg := p.Config
+	cfg := player.Config
+	vol := player.Volume
+	muted := player.IsMuted
+	isPlaying := player.IsPlaying
+	isGrouped := player.IsGrouped
 	s.playersMu.RUnlock()
 
 	info := StreamDebugInfo{
 		ID:        id,
-		Name:      name,
+		Name:      cfg.Name,
 		State:     "idle",
 		IsPlaying: isPlaying,
 		IsGrouped: isGrouped,
 		Volume:    vol,
 		Muted:     muted,
 		AudioPath: AudioPathDebugInfo{
-			Mode:          "idle",
-			Summary:       "idle — no active RTP path",
-			Stages:        []string{"idle"},
-			VolumePercent: vol,
 			Muted:         muted,
-			BufferMode:    string(cfg.BufferMode),
+			VolumePercent: vol,
 		},
 		Producers: make([]ProducerDebugInfo, 0, 1),
 		Consumers: make([]ConsumerDebugInfo, 0, 1),
 	}
-	if info.AudioPath.BufferMode == "" {
-		info.AudioPath.BufferMode = string(s.config.DefaultBufferMode)
-	}
-
-	if isPlaying {
-		info.State = "playing"
-	}
 
 	// 1. Gather Producer Info (Sendspin Ingress)
 	ingStats, hasIngress := s.ingress.GetPlayerStats(id)
+	prodState := "disconnected"
+	if ingStats.Connected {
+		if isPlaying {
+			prodState = "streaming"
+		} else {
+			prodState = "connected"
+		}
+	}
+
 	var trackStr string
-	if ingStats.Metadata.Artist != "" && ingStats.Metadata.Title != "" {
-		trackStr = fmt.Sprintf("%s - %s", ingStats.Metadata.Artist, ingStats.Metadata.Title)
-	} else if ingStats.Metadata.Title != "" {
-		trackStr = ingStats.Metadata.Title
+	if ingStats.Metadata.Title != "" {
+		if ingStats.Metadata.Artist != "" {
+			trackStr = fmt.Sprintf("%s - %s", ingStats.Metadata.Artist, ingStats.Metadata.Title)
+		} else {
+			trackStr = ingStats.Metadata.Title
+		}
 	}
 
-	prodState := "idle"
-	if isPlaying {
-		prodState = "playing"
-	} else if hasIngress && ingStats.Connected {
-		prodState = "connected"
-	}
-
-	var prodFormat string
-	bitrateIn := 0
-	if ingStats.Codec != "" {
-		if strings.EqualFold(ingStats.Codec, "opus") {
+	prodFormat := "PCM 48000Hz 2ch 16bit"
+	bitrateIn := 1536
+	if hasIngress && ingStats.Codec != "" {
+		if strings.ToLower(ingStats.Codec) == "opus" {
 			prodFormat = fmt.Sprintf("OPUS %dHz %dch", ingStats.SampleRate, ingStats.Channels)
 			bitrateIn = 128
 		} else {
@@ -861,6 +811,26 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		ingressURL = "ws://" + ingressURL + "/sendspin"
 	}
 
+	var trackProgSec float64
+	if isPlaying {
+		trackProgSec = float64(ingStats.Metadata.ProgressMs) / 1000.0
+		if !ingStats.Metadata.ProgressUpdated.IsZero() {
+			trackProgSec += time.Since(ingStats.Metadata.ProgressUpdated).Seconds()
+			if ingStats.Metadata.Duration > 0 && trackProgSec > ingStats.Metadata.Duration.Seconds() {
+				trackProgSec = ingStats.Metadata.Duration.Seconds()
+			}
+		}
+	} else if prodState == "paused" {
+		trackProgSec = float64(ingStats.Metadata.ProgressMs) / 1000.0
+	}
+
+	var discoveredCodecs []string
+	if cached, ok := s.probeCodecs.Load(id); ok {
+		for _, c := range cached.([]domain.Codec) {
+			discoveredCodecs = append(discoveredCodecs, string(c))
+		}
+	}
+
 	info.Producers = append(info.Producers, ProducerDebugInfo{
 		Type:           "Sendspin Ingress",
 		URL:            ingressURL,
@@ -872,14 +842,17 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		BitDepth:       ingStats.BitDepth,
 		BitrateKbps:    bitrateIn,
 		OfferedFormats: ingStats.OfferedFormats,
+		ExposedCodecs:  ingStats.ExposedCodecs,
 		State:          prodState,
 		Track:          trackStr,
-		Artist:         ingStats.Metadata.Artist,
-		Title:          ingStats.Metadata.Title,
-		Album:          ingStats.Metadata.Album,
-		AlbumArtist:    ingStats.Metadata.AlbumArtist,
-		ChunksReceived: ingStats.ChunksReceived,
-		BytesReceived:  ingStats.BytesReceived,
+		Artist:           ingStats.Metadata.Artist,
+		Title:            ingStats.Metadata.Title,
+		Album:            ingStats.Metadata.Album,
+		AlbumArtist:      ingStats.Metadata.AlbumArtist,
+		TrackDurationSec: ingStats.Metadata.Duration.Seconds(),
+		TrackProgressSec: trackProgSec,
+		ChunksReceived:   ingStats.ChunksReceived,
+		BytesReceived:    ingStats.BytesReceived,
 	})
 
 	info.AudioPath.IngressCodec = ingStats.Codec
@@ -909,11 +882,11 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		sessionState := string(call.session.GetState())
 		effectiveMode := string(call.session.EffectiveMod)
 		priority := call.session.Priority
-		bufferedCount := len(call.buffer)
 		lingerActive := (call.lingerTimer != nil)
 		answered := call.answered
 		startTime := call.session.StartTime
 		answerTime := call.session.AnswerTime
+		streamStartProgress := call.streamStartProgressSec
 		callID := ""
 		if call.dialog != nil {
 			callID = call.dialog.CallID()
@@ -928,6 +901,8 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 				activeCodec = rtpStats.Codec
 			}
 		}
+
+		bufferedCount := rtpStats.UpstreamChunks
 
 		if lingerActive {
 			info.State = "lingering"
@@ -953,7 +928,10 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		bitrateOut := 64
 		egressCh := 1
 		if activeCodec == domain.CodecOpus {
-			bitrateOut = 96
+			bitrateOut = bitrateIn
+			if bitrateOut <= 0 {
+				bitrateOut = 128
+			}
 			egressCh = 2
 			if rtpStats.PathIngressChannels == 1 {
 				egressCh = 1
@@ -964,21 +942,90 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		info.AudioPath.EgressCodec = string(activeCodec)
 		info.AudioPath.EgressFormat = egressFormat
 		info.AudioPath.BufferMode = effectiveMode
-		info.AudioPath.PreAnswerBuffered = bufferedCount
+		if effectiveMode == "announcement" {
+			info.AudioPath.PreAnswerBuffered = bufferedCount
+		} else {
+			info.AudioPath.PreAnswerBuffered = 0
+		}
+		info.AudioPath.UpstreamChunks = rtpStats.UpstreamChunks
+		info.AudioPath.ConversionQueue = rtpStats.ConversionQueue
 		info.AudioPath.PassthroughPackets = rtpStats.PassthroughPackets
 		info.AudioPath.TranscodePackets = rtpStats.TranscodePackets
 
+		// Calculate buffer timeline positions directly from PlayAt timestamps
+		now := time.Now()
+		var upStartOffset, upEndOffset, readyStartOffset, readyEndOffset float64
+
+		if !rtpStats.UpstreamPlayAtStart.IsZero() && !rtpStats.UpstreamPlayAtEnd.IsZero() {
+			upStartOffset = rtpStats.UpstreamPlayAtStart.Sub(now).Seconds()
+			if upStartOffset < 0 {
+				upStartOffset = 0
+			}
+			upEndOffset = rtpStats.UpstreamPlayAtEnd.Sub(now).Seconds() + 0.02
+			if upEndOffset < upStartOffset {
+				upEndOffset = upStartOffset
+			}
+		} else if rtpStats.UpstreamChunks > 0 {
+			upEndOffset = float64(rtpStats.UpstreamChunks*20) / 1000.0
+		}
+
+		if !rtpStats.ReadyPlayAtStart.IsZero() && !rtpStats.ReadyPlayAtEnd.IsZero() {
+			readyStartOffset = rtpStats.ReadyPlayAtStart.Sub(now).Seconds()
+			if readyStartOffset < 0 {
+				readyStartOffset = 0
+			}
+			readyEndOffset = rtpStats.ReadyPlayAtEnd.Sub(now).Seconds() + 0.02
+			if readyEndOffset < readyStartOffset {
+				readyEndOffset = readyStartOffset
+			}
+		} else if rtpStats.ConversionQueue > 0 {
+			readyEndOffset = float64(rtpStats.ConversionQueue*20) / 1000.0
+		}
+
+		info.AudioPath.PlayheadSec = trackProgSec
+		info.AudioPath.BufferStartSec = trackProgSec + upStartOffset
+		info.AudioPath.BufferEndSec = trackProgSec + upEndOffset
+		info.AudioPath.ReadyStartSec = trackProgSec + readyStartOffset
+		info.AudioPath.ReadyEndSec = trackProgSec + readyEndOffset
+
+		if effectiveMode == "announcement" {
+			var dialDelaySec float64
+			if !startTime.IsZero() {
+				if answered && !answerTime.IsZero() {
+					dialDelaySec = answerTime.Sub(startTime).Seconds()
+				} else {
+					dialDelaySec = time.Since(startTime).Seconds()
+				}
+			}
+			info.AudioPath.PreAnswerBuffered = int(dialDelaySec / 0.02)
+
+			if !answered {
+				info.AudioPath.HoldBackStartSec = streamStartProgress
+				info.AudioPath.HoldBackEndSec = streamStartProgress + dialDelaySec
+			} else {
+				phonePlayoutSec := streamStartProgress + durationSec
+				if phonePlayoutSec > trackProgSec {
+					phonePlayoutSec = trackProgSec
+				}
+				info.AudioPath.HoldBackStartSec = phonePlayoutSec
+				info.AudioPath.HoldBackEndSec = phonePlayoutSec + dialDelaySec
+			}
+		} else {
+			info.AudioPath.PreAnswerBuffered = 0
+		}
+
+		volDesc := volumeStageForDebug(info.AudioPath.VolumePercent, muted)
+
 		switch {
-		case !answered && bufferedCount > 0:
+		case !answered:
 			info.AudioPath.Mode = "buffering"
 			info.AudioPath.Passthrough = false
-			info.AudioPath.Summary = fmt.Sprintf("pre-answer buffer (%d chunks, mode=%s) — volume applied on flush", bufferedCount, effectiveMode)
+			info.AudioPath.Summary = fmt.Sprintf("1. Upstream buffer (%d chunks, mode=%s) → 2. Transcode (%s) → 3. RTP %s",
+				bufferedCount, effectiveMode, volDesc, strings.ToUpper(string(activeCodec)))
 			info.AudioPath.Stages = []string{
-				"ingress " + prodFormat,
-				fmt.Sprintf("hold in announcement buffer (%d chunks)", bufferedCount),
-				"waiting for SIP answer",
-				"then apply " + volumeStageForDebug(info.AudioPath.VolumePercent, muted),
-				"then → RTP " + strings.ToUpper(string(activeCodec)),
+				fmt.Sprintf("Stage 1: Upstream Ingestion & Raw Buffer (%d chunks, start protected)", bufferedCount),
+				fmt.Sprintf("Stage 2: Transcoding & Gain (%s, ready on SIP 200 OK)", volDesc),
+				fmt.Sprintf("Stage 3: Downstream RTP Playout (%s mode, waiting for answer)", strings.ToUpper(effectiveMode)),
 			}
 		case rtpStats.PathMode != "":
 			info.AudioPath.Mode = rtpStats.PathMode
@@ -995,37 +1042,42 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 			}
 		case answered:
 			info.AudioPath.Mode = "transcode"
-			info.AudioPath.Summary = prodFormat + " → processing → RTP " + strings.ToUpper(string(activeCodec))
-			info.AudioPath.Stages = []string{"ingress " + prodFormat, "RTP " + strings.ToUpper(string(activeCodec))}
+			info.AudioPath.Summary = prodFormat + " → transcode (" + volDesc + ") → RTP " + strings.ToUpper(string(activeCodec))
+			info.AudioPath.Stages = []string{
+				"Stage 1: Upstream Ingress (" + prodFormat + ")",
+				fmt.Sprintf("Stage 2: Transcode (%s) → %s", volDesc, strings.ToUpper(string(activeCodec))),
+				fmt.Sprintf("Stage 3: Downstream Playout (%s, 20ms pacing)", strings.ToUpper(effectiveMode)),
+			}
 		default:
 			info.AudioPath.Mode = "dialing"
-			info.AudioPath.Summary = "SIP dialing — media path not active yet"
-			info.AudioPath.Stages = []string{"ingress " + prodFormat, "SIP dialing", "RTP pending"}
+			info.AudioPath.Summary = "SIP dialing — media path initializing"
+			info.AudioPath.Stages = []string{"Stage 1: Upstream Ingress (" + prodFormat + ")", "Stage 2: Codec Negotiation", "Stage 3: RTP Pending"}
 		}
 
 		info.Consumers = append(info.Consumers, ConsumerDebugInfo{
-			Type:           "SIP/RTP Egress",
-			URL:            cfg.SIPTarget,
-			CallID:         callID,
-			State:          sessionState,
-			ConfigCodec:    string(cfg.Codec),
-			ActiveCodec:    string(activeCodec),
-			OfferedCodecs:  offeredSIPCodecs,
-			NegotiatedSDP:  fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(activeCodec)), activeCodec.PayloadType(), activeCodec.RTPClockRate()),
-			RTPClockRate:   activeCodec.RTPClockRate(),
-			PayloadType:    activeCodec.PayloadType(),
-			Format:         egressFormat,
-			LocalRTP:       localRTPStr,
-			RemoteRTP:      rtpStats.RemoteAddr,
-			AutoAnswer:     autoAnswerDesc,
-			BufferMode:     effectiveMode,
-			Priority:       priority,
-			BufferedChunks: bufferedCount,
-			LingerActive:   lingerActive,
-			PacketsSent:    rtpStats.PacketsSent,
-			BytesSent:      rtpStats.BytesSent,
-			BitrateKbps:    bitrateOut,
-			DurationSec:    durationSec,
+			Type:             "SIP/RTP Egress",
+			URL:              cfg.SIPTarget,
+			CallID:           callID,
+			State:            sessionState,
+			ConfigCodec:      string(cfg.Codec),
+			ActiveCodec:      string(activeCodec),
+			DiscoveredCodecs: discoveredCodecs,
+			OfferedCodecs:    offeredSIPCodecs,
+			NegotiatedSDP:    fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(activeCodec)), activeCodec.PayloadType(), activeCodec.RTPClockRate()),
+			RTPClockRate:     activeCodec.RTPClockRate(),
+			PayloadType:      activeCodec.PayloadType(),
+			Format:           egressFormat,
+			LocalRTP:         localRTPStr,
+			RemoteRTP:        rtpStats.RemoteAddr,
+			AutoAnswer:       autoAnswerDesc,
+			BufferMode:       effectiveMode,
+			Priority:         priority,
+			BufferedChunks:   bufferedCount,
+			LingerActive:     lingerActive,
+			PacketsSent:      rtpStats.PacketsSent,
+			BytesSent:        rtpStats.BytesSent,
+			BitrateKbps:      bitrateOut,
+			DurationSec:      durationSec,
 		})
 	} else {
 		bMode := cfg.BufferMode
@@ -1042,30 +1094,31 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		info.AudioPath.BufferMode = string(bMode)
 		info.AudioPath.Summary = "idle — " + prodFormat + " ⇢ (no call) ⇢ " + strings.ToUpper(string(cfg.Codec))
 		info.AudioPath.Stages = []string{
-			"ingress " + prodFormat,
-			"no active SIP/RTP session",
-			"configured egress " + strings.ToUpper(string(cfg.Codec)),
+			"Stage 1: Upstream Ingress (" + prodFormat + ")",
+			"Stage 2: No active SIP session",
+			"Stage 3: Configured Egress " + strings.ToUpper(string(cfg.Codec)),
 		}
 
 		info.Consumers = append(info.Consumers, ConsumerDebugInfo{
-			Type:          "SIP/RTP Egress",
-			URL:           cfg.SIPTarget,
-			State:         "idle",
-			ConfigCodec:   string(cfg.Codec),
-			ActiveCodec:   string(cfg.Codec),
-			OfferedCodecs: offeredSIPCodecs,
-			NegotiatedSDP: fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(cfg.Codec)), cfg.Codec.PayloadType(), cfg.Codec.RTPClockRate()),
-			RTPClockRate:  cfg.Codec.RTPClockRate(),
-			PayloadType:   cfg.Codec.PayloadType(),
-			Format:        egressFormat,
-			AutoAnswer:    autoAnswerDesc,
-			BufferMode:    string(bMode),
-			Priority:      cfg.Priority,
-			BitrateKbps:   bitrateOut,
+			Type:             "SIP/RTP Egress",
+			URL:              cfg.SIPTarget,
+			State:            "idle",
+			ConfigCodec:      string(cfg.Codec),
+			ActiveCodec:      string(cfg.Codec),
+			DiscoveredCodecs: discoveredCodecs,
+			OfferedCodecs:    offeredSIPCodecs,
+			NegotiatedSDP:    fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(cfg.Codec)), cfg.Codec.PayloadType(), cfg.Codec.RTPClockRate()),
+			RTPClockRate:     cfg.Codec.RTPClockRate(),
+			PayloadType:      cfg.Codec.PayloadType(),
+			Format:           egressFormat,
+			AutoAnswer:       autoAnswerDesc,
+			BufferMode:       string(bMode),
+			Priority:         cfg.Priority,
+			BitrateKbps:      bitrateOut,
 		})
 	}
 
-	return info
+	return info, true
 }
 
 func volumeStageForDebug(volumePercent int, muted bool) string {

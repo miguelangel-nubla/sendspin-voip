@@ -34,6 +34,8 @@ type Server struct {
 	sipCaller     app.SIPCallerPort
 	startTime     time.Time
 	httpServer    *http.Server
+	stopCtx       context.Context
+	stopCancel    context.CancelFunc
 }
 
 // NewServer creates a new HTTP server.
@@ -53,21 +55,21 @@ func NewServer(
 		cfg.Version = "dev"
 	}
 
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+
 	s := &Server{
 		logger:        logger,
 		config:        cfg,
 		bridgeService: bridgeService,
 		sipCaller:     sipCaller,
 		startTime:     time.Now(),
+		stopCtx:       stopCtx,
+		stopCancel:    stopCancel,
 	}
 
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
-	// pprof's CPU profile and execution trace endpoints stream for their whole
-	// duration (30s by default), so a blanket WriteTimeout truncates them and
-	// hands back a corrupt profile. Relax the write deadline when pprof is on
-	// and keep the header read deadline either way.
 	writeTimeout := 10 * time.Second
 	if cfg.EnablePprof {
 		writeTimeout = 0
@@ -90,8 +92,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", s.handleDashboard)
 	mux.HandleFunc("/streams", s.handleDashboard)
 
-	// JSON APIs (go2rtc compatible style)
+	// JSON APIs (go2rtc compatible style + pipeline inspector)
 	mux.HandleFunc("/api/streams", s.handleAPIStreams)
+	mux.HandleFunc("/api/events", s.handleAPIEvents)
 	mux.HandleFunc("/api/info", s.handleAPIInfo)
 	mux.HandleFunc("/api/status", s.handleAPIInfo)
 	mux.HandleFunc("/api/codecs", s.handleAPICodecs)
@@ -124,9 +127,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		if provided == "" {
 			provided = r.Header.Get("X-Api-Token")
 		}
-		// Constant-time compare: a byte-by-byte `!=` leaks the length of the
-		// matching prefix through timing, which is enough to recover a token
-		// over a LAN given that this endpoint is unrated-limited.
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="sendspin-voip"`)
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
@@ -174,10 +174,13 @@ func formatPortForURL(addr string) string {
 // Shutdown stops the HTTP server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info("Stopping HTTP server...")
+	if s.stopCancel != nil {
+		s.stopCancel()
+	}
 	return s.httpServer.Shutdown(ctx)
 }
 
-// handleAPIStreams returns streams information similar to go2rtc.
+// handleAPIStreams returns streams information.
 func (s *Server) handleAPIStreams(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -195,7 +198,6 @@ func (s *Server) handleAPIStreams(w http.ResponseWriter, r *http.Request) {
 
 	streams := s.bridgeService.GetStreamsDebugInfo()
 
-	// If format=list requested, return JSON array instead of map
 	if r.URL.Query().Get("format") == "list" {
 		list := make([]app.StreamDebugInfo, 0, len(streams))
 		for _, info := range streams {
@@ -206,6 +208,58 @@ func (s *Server) handleAPIStreams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = json.NewEncoder(w).Encode(streams)
+}
+
+// handleAPIEvents provides Server-Sent Events (SSE) for zero-latency live dashboard updates.
+func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	// Disable HTTP server write deadline for this long-lived SSE stream
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	sendUpdate := func() bool {
+		streams := s.bridgeService.GetStreamsDebugInfo()
+		data, err := json.Marshal(streams)
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+
+	// Send immediate initial update
+	if !sendUpdate() {
+		return
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-s.stopCtx.Done():
+			return
+		case <-ticker.C:
+			if !sendUpdate() {
+				return
+			}
+		}
+	}
 }
 
 // SystemInfo represents runtime application status.
@@ -224,7 +278,7 @@ type SystemInfo struct {
 	TotalStreams       int           `json:"total_streams"`
 }
 
-// handleAPIInfo returns system status, memory stats, SIP status.
+// handleAPIInfo returns system status, memory stats, and SIP status.
 func (s *Server) handleAPIInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -270,6 +324,28 @@ func (s *Server) handleAPICodecs(w http.ResponseWriter, r *http.Request) {
 
 	codecs := []map[string]any{
 		{
+			"codec":             "opus",
+			"name":              "Opus Interactive Audio",
+			"sdp_name":          "opus/48000/2",
+			"rtp_clock_rate":    48000,
+			"audio_sample_rate": 48000,
+			"payload_type":      96,
+			"bitrate_kbps":      128,
+			"channels":          2,
+			"description":       "High fidelity multi-room audio with zero-copy passthrough when volume is 100%",
+		},
+		{
+			"codec":             "l16",
+			"name":              "L16 Linear PCM (Uncompressed)",
+			"sdp_name":          "L16/48000/1",
+			"rtp_clock_rate":    48000,
+			"audio_sample_rate": 48000,
+			"payload_type":      97,
+			"bitrate_kbps":      768,
+			"channels":          1,
+			"description":       "Studio master uncompressed linear PCM audio streaming",
+		},
+		{
 			"codec":             "g722",
 			"name":              "G.722 HD Voice",
 			"sdp_name":          "G722/8000",
@@ -278,6 +354,7 @@ func (s *Server) handleAPICodecs(w http.ResponseWriter, r *http.Request) {
 			"payload_type":      9,
 			"bitrate_kbps":      64,
 			"channels":          1,
+			"description":       "Wideband HD VoIP codec with crystal clear speech synthesis",
 		},
 		{
 			"codec":             "pcmu",
@@ -288,6 +365,7 @@ func (s *Server) handleAPICodecs(w http.ResponseWriter, r *http.Request) {
 			"payload_type":      0,
 			"bitrate_kbps":      64,
 			"channels":          1,
+			"description":       "Universal standard telephony codec (North America/Japan standard)",
 		},
 		{
 			"codec":             "pcma",
@@ -298,26 +376,7 @@ func (s *Server) handleAPICodecs(w http.ResponseWriter, r *http.Request) {
 			"payload_type":      8,
 			"bitrate_kbps":      64,
 			"channels":          1,
-		},
-		{
-			"codec":             "opus",
-			"name":              "Opus Interactive Audio",
-			"sdp_name":          "opus/48000/2",
-			"rtp_clock_rate":    48000,
-			"audio_sample_rate": 48000,
-			"payload_type":      96,
-			"bitrate_kbps":      128,
-			"channels":          2,
-		},
-		{
-			"codec":             "l16",
-			"name":              "L16 Linear PCM (Uncompressed Mono)",
-			"sdp_name":          "L16/48000/1",
-			"rtp_clock_rate":    48000,
-			"audio_sample_rate": 48000,
-			"payload_type":      97,
-			"bitrate_kbps":      768,
-			"channels":          1,
+			"description":       "Universal standard telephony codec (International/European standard)",
 		},
 	}
 

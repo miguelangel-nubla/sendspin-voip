@@ -62,6 +62,7 @@ type playerWorker struct {
 	currentChannels int
 	currentBitDepth int
 	offeredFormats  []string
+	exposedCodecs   []string
 	currentMeta     domain.StreamMetadata
 	currentVolume   int
 	isMuted         bool
@@ -426,6 +427,15 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 
 		supportedFormats, supportCodecs, supportSampleRates, supportChannels := BuildSupportedFormatsForCodecs(w.codecs, w.cfg.Codec)
 
+		var offeredFmtStrings []string
+		for _, f := range supportedFormats {
+			offeredFmtStrings = append(offeredFmtStrings, fmt.Sprintf("%s %dHz %dch %dbit", strings.ToUpper(f.Codec), f.SampleRate, f.Channels, f.BitDepth))
+		}
+		w.statsMu.Lock()
+		w.offeredFormats = offeredFmtStrings
+		w.exposedCodecs = supportCodecs
+		w.statsMu.Unlock()
+
 		client := protocol.NewClient(protocol.Config{
 			ServerAddr:     serverAddr,
 			ClientID:       w.cfg.ID,
@@ -563,6 +573,11 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					ing.logger.Warn("Failed to build Opus decoder for stream format",
 						"player_id", w.cfg.ID, "channels", currentChannels, "err", err)
 				}
+				currentMeta.ProgressMs = 0
+				currentMeta.ProgressUpdated = time.Now()
+				w.statsMu.Lock()
+				w.currentMeta = currentMeta
+				w.statsMu.Unlock()
 
 				ing.logger.Info("Sendspin stream start received",
 					"player_id", w.cfg.ID,
@@ -581,20 +596,40 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 
 			case <-client.StreamEnd:
 				ing.logger.Info("Sendspin stream end received", "player_id", w.cfg.ID)
+				w.statsMu.Lock()
+				w.currentMeta.ProgressMs = 0
+				w.currentMeta.ProgressUpdated = time.Time{}
+				w.statsMu.Unlock()
 				w.handler.OnStreamEnd(w.cfg.ID)
 
 			case <-client.StreamClear:
 				ing.logger.Debug("Sendspin stream clear received (flushing buffer)", "player_id", w.cfg.ID)
+				w.statsMu.Lock()
+				w.currentMeta.ProgressMs = 0
+				w.currentMeta.ProgressUpdated = time.Time{}
+				w.statsMu.Unlock()
 				w.handler.OnStreamClear(w.cfg.ID)
 
 			case stateMsg := <-client.ServerState:
 				if stateMsg.Metadata != nil {
+					var trackDuration time.Duration
+					var trackProgMs int
+					if stateMsg.Metadata.Progress != nil {
+						if stateMsg.Metadata.Progress.TrackDuration > 0 {
+							trackDuration = time.Duration(stateMsg.Metadata.Progress.TrackDuration) * time.Millisecond
+						}
+						trackProgMs = stateMsg.Metadata.Progress.TrackProgress
+					}
+
 					currentMeta = domain.StreamMetadata{
-						Title:       ptrString(stateMsg.Metadata.Title),
-						Artist:      ptrString(stateMsg.Metadata.Artist),
-						AlbumArtist: ptrString(stateMsg.Metadata.AlbumArtist),
-						Album:       ptrString(stateMsg.Metadata.Album),
-						StreamTitle: ptrString(stateMsg.Metadata.Title),
+						Title:           ptrString(stateMsg.Metadata.Title),
+						Artist:          ptrString(stateMsg.Metadata.Artist),
+						AlbumArtist:     ptrString(stateMsg.Metadata.AlbumArtist),
+						Album:           ptrString(stateMsg.Metadata.Album),
+						StreamTitle:     ptrString(stateMsg.Metadata.Title),
+						Duration:        trackDuration,
+						ProgressMs:      trackProgMs,
+						ProgressUpdated: time.Now(),
 					}
 					w.statsMu.Lock()
 					w.currentMeta = currentMeta
@@ -780,6 +815,7 @@ func (ing *Ingress) GetPlayerStats(playerID string) (app.IngressPlayerStats, boo
 		Channels:       w.currentChannels,
 		BitDepth:       w.currentBitDepth,
 		OfferedFormats: w.offeredFormats,
+		ExposedCodecs:  w.exposedCodecs,
 		Metadata:       w.currentMeta,
 		ChunksReceived: w.chunksReceived,
 		BytesReceived:  w.bytesReceived,
