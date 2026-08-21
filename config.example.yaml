@@ -1,6 +1,12 @@
 # sendspin-voip Configuration Example
 log_level: info # debug, info, warn, error
 
+# Where per-player volume/mute state is persisted across restarts.
+# Leave blank to use /data/sendspin-voip-state.json inside a Home Assistant
+# add-on (the only directory HA persists across restarts and upgrades) and
+# ./sendspin-voip-state.json elsewhere. Override with STATE_FILE.
+state_file: ""
+
 # Web UI & Debug HTTP API (go2rtc style)
 http:
   listen: ":8080" # Web UI dashboard at http://localhost:8080/ and JSON at /api/streams

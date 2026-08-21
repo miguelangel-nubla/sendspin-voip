@@ -99,7 +99,8 @@ func main() {
 	})
 
 	arbiter := domain.NewTargetArbiter(cfg.Bridge.ConflictPolicy)
-	stateStore := state.NewFileStore("sendspin-voip-state.json")
+	logger.Info("Persisting player state", "path", cfg.StateFile)
+	stateStore := state.NewFileStore(cfg.StateFile)
 	bridgeService := app.NewBridgeService(
 		logger,
 		cfg.ToBridgeConfig(),

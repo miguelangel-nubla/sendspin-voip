@@ -16,6 +16,7 @@ host_network: true
 
 options:
   log_level: "info"
+  state_file: "/data/sendspin-voip-state.json"
   http:
     listen: ":8080"
     api_token: ""
@@ -49,6 +50,7 @@ options:
 
 schema:
   log_level: list(debug|info|warn|error)?
+  state_file: str?
   http:
     listen: str?
     api_token: password?
