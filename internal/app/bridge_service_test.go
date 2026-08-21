@@ -254,8 +254,10 @@ func TestBridgeService_LifecycleAndPlayback(t *testing.T) {
 	}
 	bridge.OnAudioChunk("player-desk", chunk)
 
-	// 4. Volume change
-	bridge.OnVolumeChange("player-desk", 75, false)
+	// 4. Volume change and mute
+	bridge.OnVolumeChange("player-desk", 75)
+	bridge.OnMuteChange("player-desk", true)
+	bridge.OnMuteChange("player-desk", false)
 
 	// 5. Group update
 	bridge.OnGroupUpdate("player-desk", true)

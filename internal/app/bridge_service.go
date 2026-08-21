@@ -516,7 +516,7 @@ func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 // the RTP pacer queue is flushed so the new level applies immediately.
 // The pre-answer announcement buffer (call.buffer) is left intact — those
 // chunks are still raw PCM/Opus and get the current volume when flushed on answer.
-func (s *BridgeService) OnVolumeChange(playerID string, volume int, muted bool) {
+func (s *BridgeService) OnVolumeChange(playerID string, volume int) {
 	if volume > 100 {
 		volume = 100
 	}
@@ -527,11 +527,26 @@ func (s *BridgeService) OnVolumeChange(playerID string, volume int, muted bool) 
 	s.playersMu.Lock()
 	if p, ok := s.players[playerID]; ok {
 		p.Volume = volume
-		p.IsMuted = muted
-		s.logger.Debug("Player volume changed", "player_id", playerID, "volume", volume, "muted", muted)
+		s.logger.Debug("Player volume changed", "player_id", playerID, "volume", volume)
 	}
 	s.playersMu.Unlock()
 
+	s.flushActiveRTPBuffer(playerID)
+}
+
+// OnMuteChange updates player mute status.
+func (s *BridgeService) OnMuteChange(playerID string, muted bool) {
+	s.playersMu.Lock()
+	if p, ok := s.players[playerID]; ok {
+		p.IsMuted = muted
+		s.logger.Debug("Player mute state changed", "player_id", playerID, "muted", muted)
+	}
+	s.playersMu.Unlock()
+
+	s.flushActiveRTPBuffer(playerID)
+}
+
+func (s *BridgeService) flushActiveRTPBuffer(playerID string) {
 	if val, ok := s.activeCalls.Load(playerID); ok {
 		call := val.(*activeCallState)
 		call.mu.Lock()
@@ -544,6 +559,7 @@ func (s *BridgeService) OnVolumeChange(playerID string, volume int, muted bool) 
 		}
 	}
 }
+
 
 // OnGroupUpdate tracks multi-room sync group membership.
 func (s *BridgeService) OnGroupUpdate(playerID string, isGrouped bool) {

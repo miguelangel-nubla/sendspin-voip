@@ -40,6 +40,8 @@ type playerWorker struct {
 	currentBitDepth int
 	offeredFormats  []string
 	currentMeta     domain.StreamMetadata
+	currentVolume   int
+	isMuted         bool
 	chunksReceived  uint64
 	bytesReceived   uint64
 
@@ -176,11 +178,21 @@ func (ing *Ingress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs 
 	ing.mu.Lock()
 	defer ing.mu.Unlock()
 
+	initialVol := player.DefaultVolume
+	initialMuted := false
+
 	// If already registered with identical codecs and connected, skip
 	if existing, ok := ing.workers[player.ID]; ok {
 		if codecsEqual(existing.codecs, codecs) && existing.client != nil && existing.client.IsConnected() {
 			return nil
 		}
+		existing.statsMu.RLock()
+		if existing.currentVolume > 0 {
+			initialVol = existing.currentVolume
+		}
+		initialMuted = existing.isMuted
+		existing.statsMu.RUnlock()
+
 		existing.cancel()
 		if existing.client != nil {
 			existing.client.Close()
@@ -188,13 +200,19 @@ func (ing *Ingress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs 
 		delete(ing.workers, player.ID)
 	}
 
+	if initialVol <= 0 || initialVol > 100 {
+		initialVol = 100
+	}
+
 	ctx, cancel := context.WithCancel(ing.ctx)
 	worker := &playerWorker{
-		cfg:     player,
-		codecs:  codecs,
-		handler: handler,
-		cancel:  cancel,
-		ctx:     ctx,
+		cfg:           player,
+		codecs:        codecs,
+		handler:       handler,
+		cancel:        cancel,
+		ctx:           ctx,
+		currentVolume: initialVol,
+		isMuted:       initialMuted,
 	}
 	ing.workers[player.ID] = worker
 
@@ -425,6 +443,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		var currentRate = primaryRate
 		var currentChannels = primaryChannels
 		var currentBitDepth = primaryBitDepth
+		var isStreaming bool
 
 		opusDecoder, _ := opus.NewDecoderWithOutput(48000, 2)
 		pcm16Buf := make([]int16, 5760*2) // up to 120ms frame at 48kHz stereo
@@ -448,6 +467,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				break eventLoop
 
 			case startMsg := <-client.StreamStart:
+				isStreaming = true
 				if startMsg.Player != nil {
 					currentCodec = strings.ToLower(startMsg.Player.Codec)
 					if currentCodec == "" {
@@ -480,10 +500,15 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					"bit_depth", currentBitDepth,
 					"title", currentMeta.Title,
 				)
-				_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: 100, Muted: false})
+				w.statsMu.RLock()
+				vol := w.currentVolume
+				muted := w.isMuted
+				w.statsMu.RUnlock()
+				_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
 				w.handler.OnStreamStart(w.cfg.ID, currentMeta)
 
 			case <-client.StreamEnd:
+				isStreaming = false
 				ing.logger.Info("Sendspin stream end received", "player_id", w.cfg.ID)
 				w.handler.OnStreamEnd(w.cfg.ID)
 
@@ -522,9 +547,25 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 
 			case cmd := <-client.ControlMsgs:
 				if cmd.Command == "volume" {
-					w.handler.OnVolumeChange(w.cfg.ID, cmd.Volume, false)
+					w.statsMu.Lock()
+					w.currentVolume = cmd.Volume
+					vol := w.currentVolume
+					muted := w.isMuted
+					w.statsMu.Unlock()
+					if isStreaming {
+						_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+					}
+					w.handler.OnVolumeChange(w.cfg.ID, cmd.Volume)
 				} else if cmd.Command == "mute" {
-					w.handler.OnVolumeChange(w.cfg.ID, 0, cmd.Mute)
+					w.statsMu.Lock()
+					w.isMuted = cmd.Mute
+					vol := w.currentVolume
+					muted := w.isMuted
+					w.statsMu.Unlock()
+					if isStreaming {
+						_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+					}
+					w.handler.OnMuteChange(w.cfg.ID, cmd.Mute)
 				}
 
 			case chunk := <-client.AudioChunks:

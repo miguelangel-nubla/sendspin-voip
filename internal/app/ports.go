@@ -217,6 +217,8 @@ type PlayerEventHandler interface {
 	OnPlaybackState(playerID string, state string)
 	OnAudioChunk(playerID string, chunk domain.AudioChunk)
 	OnStreamEnd(playerID string)
-	OnVolumeChange(playerID string, volume int, muted bool)
+	OnVolumeChange(playerID string, volume int)
+	OnMuteChange(playerID string, muted bool)
 	OnGroupUpdate(playerID string, isGrouped bool)
 }
+
