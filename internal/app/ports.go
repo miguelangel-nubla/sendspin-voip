@@ -209,6 +209,8 @@ type RTPSession interface {
 	SetVolume(volumePercent int)
 	// PushAudio sends raw audio chunks from Sendspin into the Upstream stage.
 	PushAudio(chunk domain.AudioChunk, volumePercent int) error
+	// InjectSilence feeds silence frames into the pipeline to preserve announcement hold-back lag on seek/track transition.
+	InjectSilence(duration time.Duration)
 	// ClearBuffer flushes all 3 stages (Upstream, Conversion, Downstream) on seek / stream clear.
 	ClearBuffer()
 	// DrainAndClose waits for drainDelay then closes the RTP socket.

@@ -269,13 +269,12 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 			} else {
 				call.cancelLingerLocked()
 				call.session.Metadata = meta
+
+				startProgSec := float64(meta.ProgressMs) / 1000.0
+				call.streamStartProgressSec = startProgSec
 				call.mu.Unlock()
 
-				if call.rtpSession != nil {
-					call.rtpSession.ClearBuffer()
-				}
-
-				s.logger.Info("Reusing active SIP call session for stream (seek/next track)",
+				s.logger.Info("Reusing active SIP call session for stream (next track / transition)",
 					"player_id", playerID,
 					"target", playerCfg.SIPTarget,
 					"title", meta.Title,
@@ -448,8 +447,19 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 func (s *BridgeService) OnStreamClear(playerID string) {
 	if val, ok := s.activeCalls.Load(playerID); ok {
 		call := val.(*activeCallState)
+		call.mu.Lock()
+		var dialDelay time.Duration
+		if !call.session.StartTime.IsZero() && !call.session.AnswerTime.IsZero() {
+			dialDelay = call.session.AnswerTime.Sub(call.session.StartTime)
+		}
+		bufferMode := call.session.EffectiveMod
+		call.mu.Unlock()
+
 		if call.rtpSession != nil {
 			call.rtpSession.ClearBuffer()
+			if bufferMode == domain.BufferModeAnnouncement && dialDelay > 0 {
+				call.rtpSession.InjectSilence(dialDelay)
+			}
 		}
 		s.logger.Debug("Flushed audio pipeline buffers on stream clear", "player_id", playerID)
 	}
@@ -517,13 +527,20 @@ func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 	}
 	call := val.(*activeCallState)
 
-	// Instantly clear any queued audio frames across all 3 stages
+	lingerDelay := time.Duration(s.config.IdleHangupDelayMs) * time.Millisecond
+
+	// Calculate remaining buffer playout duration so the audio finishes playing completely
+	var drainDuration time.Duration
 	if call.rtpSession != nil {
-		call.rtpSession.ClearBuffer()
+		stats := call.rtpSession.Stats()
+		bufferedFrames := stats.UpstreamChunks + stats.ConversionQueue
+		if bufferedFrames > 0 {
+			drainDuration = time.Duration(bufferedFrames) * 20 * time.Millisecond
+		}
 	}
 
-	lingerDelay := time.Duration(s.config.IdleHangupDelayMs) * time.Millisecond
-	if lingerDelay <= 0 {
+	totalDelay := drainDuration + lingerDelay
+	if totalDelay <= 0 {
 		s.terminatePlayerCall(playerID, true)
 		return
 	}
@@ -537,7 +554,7 @@ func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 	call.cancelLingerLocked()
 	gen := call.lingerGen
 
-	call.lingerTimer = time.AfterFunc(lingerDelay, func() {
+	call.lingerTimer = time.AfterFunc(totalDelay, func() {
 		call.mu.Lock()
 		// A timer that fired just as it was being cancelled (or replaced) blocks
 		// here until the canceller releases mu. The generation check makes that

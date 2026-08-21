@@ -125,6 +125,7 @@ func (m *mockRTPSession) PushAudio(chunk domain.AudioChunk, volumePercent int) e
 	m.chunksPushed++
 	return nil
 }
+func (m *mockRTPSession) InjectSilence(duration time.Duration) {}
 func (m *mockRTPSession) ClearBuffer() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

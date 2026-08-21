@@ -173,6 +173,24 @@ func (s *Session) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 	return nil
 }
 
+// InjectSilence feeds raw PCM silence into UpstreamPlayer to preserve the announcement holdback buffer lag.
+func (s *Session) InjectSilence(duration time.Duration) {
+	if duration <= 0 {
+		return
+	}
+	// 20ms of stereo 48kHz PCM silence (48000 * 2 * 0.02 = 1920 int32 samples)
+	sampleCount := (48000 * 2 * 20) / 1000
+	numChunks := int(duration / (20 * time.Millisecond))
+	for i := 0; i < numChunks; i++ {
+		s.upstream.Push(domain.AudioChunk{
+			Samples:    make([]int32, sampleCount),
+			SampleRate: 48000,
+			Channels:   2,
+			BitDepth:   16,
+		})
+	}
+}
+
 // ClearBuffer synchronously resets all layers on seek or stream stop.
 func (s *Session) ClearBuffer() {
 	s.audioPath.Clear()
