@@ -49,6 +49,7 @@ type BridgeConfig struct {
 	DefaultBufferMode domain.BufferMode     `yaml:"default_buffer_mode" json:"default_buffer_mode"`
 	PickupBufferMs    int                   `yaml:"pickup_buffer_ms" json:"pickup_buffer_ms"`
 	DrainDelayMs      int                   `yaml:"drain_delay_ms" json:"drain_delay_ms"`
+	IdleHangupDelayMs int                   `yaml:"idle_hangup_delay_ms" json:"idle_hangup_delay_ms"`
 	ConflictPolicy    domain.ConflictPolicy `yaml:"target_conflict_policy" json:"target_conflict_policy"`
 }
 
@@ -137,6 +138,7 @@ func DefaultConfig() *AppConfig {
 			DefaultBufferMode: domain.BufferModeAnnouncement,
 			PickupBufferMs:    2000,
 			DrainDelayMs:      500,
+			IdleHangupDelayMs: 5000,
 			ConflictPolicy:    domain.ConflictPolicyPreemptAnnouncements,
 		},
 		Players: []PlayerConfig{},
@@ -171,6 +173,11 @@ func applyEnvOverrides(cfg *AppConfig) {
 	if v := os.Getenv("PICKUP_BUFFER_MS"); v != "" {
 		if val, err := strconv.Atoi(v); err == nil {
 			cfg.Bridge.PickupBufferMs = val
+		}
+	}
+	if v := os.Getenv("IDLE_HANGUP_DELAY_MS"); v != "" {
+		if val, err := strconv.Atoi(v); err == nil {
+			cfg.Bridge.IdleHangupDelayMs = val
 		}
 	}
 }
@@ -260,6 +267,7 @@ func (c *AppConfig) ToBridgeConfig() app.BridgeConfig {
 		DefaultBufferMode: c.Bridge.DefaultBufferMode,
 		PickupBufferMs:    c.Bridge.PickupBufferMs,
 		DrainDelayMs:      c.Bridge.DrainDelayMs,
+		IdleHangupDelayMs: c.Bridge.IdleHangupDelayMs,
 		ConflictPolicy:    c.Bridge.ConflictPolicy,
 	}
 }

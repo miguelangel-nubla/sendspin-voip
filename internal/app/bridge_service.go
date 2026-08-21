@@ -16,17 +16,19 @@ type BridgeConfig struct {
 	DefaultBufferMode domain.BufferMode
 	PickupBufferMs    int
 	DrainDelayMs      int
+	IdleHangupDelayMs int
 	ConflictPolicy    domain.ConflictPolicy
 }
 
 type activeCallState struct {
-	session    *domain.CallSession
-	dialog     SIPDialog
-	rtpSession RTPSession
-	mu         sync.Mutex
-	buffer     []domain.AudioChunk
-	answered   bool
-	done       chan struct{}
+	session     *domain.CallSession
+	dialog      SIPDialog
+	rtpSession  RTPSession
+	mu          sync.Mutex
+	buffer      []domain.AudioChunk
+	answered    bool
+	done        chan struct{}
+	lingerTimer *time.Timer
 }
 
 // BridgeService coordinates Sendspin player ingress with SIP call signaling and RTP media streaming.
@@ -60,6 +62,11 @@ func NewBridgeService(
 	}
 	if config.DrainDelayMs <= 0 {
 		config.DrainDelayMs = 500
+	}
+	if config.IdleHangupDelayMs < 0 {
+		config.IdleHangupDelayMs = 0
+	} else if config.IdleHangupDelayMs == 0 {
+		config.IdleHangupDelayMs = 5000
 	}
 	if config.DefaultBufferMode == "" {
 		config.DefaultBufferMode = domain.BufferModeAnnouncement
@@ -115,6 +122,35 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 	player.IsPlaying = true
 	playerCfg := player.Config
 	s.playersMu.Unlock()
+
+	// 1. Check if there is already an active or lingering call for this player (e.g. seek, next track)
+	if val, ok := s.activeCalls.Load(playerID); ok {
+		call := val.(*activeCallState)
+		call.mu.Lock()
+		state := call.session.GetState()
+		if state == domain.StateActive || state == domain.StateDialing {
+			if call.lingerTimer != nil {
+				call.lingerTimer.Stop()
+				call.lingerTimer = nil
+			}
+			call.session.Metadata = meta
+			call.buffer = nil
+			call.mu.Unlock()
+
+			if call.rtpSession != nil {
+				call.rtpSession.ClearBuffer()
+			}
+
+			s.logger.Info("Reusing active SIP call session for stream (seek/next track)",
+				"player_id", playerID,
+				"target", playerCfg.SIPTarget,
+				"title", meta.Title,
+				"artist", meta.Artist,
+			)
+			return
+		}
+		call.mu.Unlock()
+	}
 
 	effectiveMode := playerCfg.BufferMode
 	if effectiveMode == "" {
@@ -270,6 +306,46 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 	}
 }
 
+// OnStreamClear handles buffer flushing requested by Music Assistant (e.g. on seek).
+func (s *BridgeService) OnStreamClear(playerID string) {
+	if val, ok := s.activeCalls.Load(playerID); ok {
+		call := val.(*activeCallState)
+		call.mu.Lock()
+		call.buffer = nil
+		call.mu.Unlock()
+
+		if call.rtpSession != nil {
+			call.rtpSession.ClearBuffer()
+		}
+		s.logger.Debug("Flushed audio buffer on stream clear", "player_id", playerID)
+	}
+}
+
+// OnPlaybackState handles playback state changes from Music Assistant (playing, paused, stopped).
+func (s *BridgeService) OnPlaybackState(playerID string, state string) {
+	s.logger.Debug("Playback state changed", "player_id", playerID, "state", state)
+	switch state {
+	case "paused", "stopped":
+		s.handleStreamPauseOrStop(playerID)
+	case "playing":
+		s.playersMu.Lock()
+		if p, ok := s.players[playerID]; ok {
+			p.IsPlaying = true
+		}
+		s.playersMu.Unlock()
+
+		if val, ok := s.activeCalls.Load(playerID); ok {
+			call := val.(*activeCallState)
+			call.mu.Lock()
+			if call.lingerTimer != nil {
+				call.lingerTimer.Stop()
+				call.lingerTimer = nil
+			}
+			call.mu.Unlock()
+		}
+	}
+}
+
 // OnAudioChunk receives decoded audio chunks from the Sendspin player client.
 func (s *BridgeService) OnAudioChunk(playerID string, chunk domain.AudioChunk) {
 	val, ok := s.activeCalls.Load(playerID)
@@ -278,17 +354,11 @@ func (s *BridgeService) OnAudioChunk(playerID string, chunk domain.AudioChunk) {
 	}
 	call := val.(*activeCallState)
 
-	s.playersMu.RLock()
-	volume := 100
-	if p, ok := s.players[playerID]; ok {
-		volume = p.Volume
-		if p.IsMuted {
-			volume = 0
-		}
-	}
-	s.playersMu.RUnlock()
-
 	call.mu.Lock()
+	if call.lingerTimer != nil {
+		call.lingerTimer.Stop()
+		call.lingerTimer = nil
+	}
 	answered := call.answered
 	if !answered {
 		if call.session.EffectiveMod == domain.BufferModeAnnouncement {
@@ -303,6 +373,16 @@ func (s *BridgeService) OnAudioChunk(playerID string, chunk domain.AudioChunk) {
 	}
 	call.mu.Unlock()
 
+	s.playersMu.RLock()
+	volume := 100
+	if p, ok := s.players[playerID]; ok {
+		volume = p.Volume
+		if p.IsMuted {
+			volume = 0
+		}
+	}
+	s.playersMu.RUnlock()
+
 	if err := call.rtpSession.PushAudio(chunk, volume); err != nil {
 		s.logger.Debug("Failed to push audio to RTP session", "player_id", playerID, "err", err)
 	}
@@ -310,14 +390,61 @@ func (s *BridgeService) OnAudioChunk(playerID string, chunk domain.AudioChunk) {
 
 // OnStreamEnd handles stream completion from Music Assistant.
 func (s *BridgeService) OnStreamEnd(playerID string) {
+	s.logger.Info("Stream ended from Music Assistant", "player_id", playerID)
+	s.handleStreamPauseOrStop(playerID)
+}
+
+func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 	s.playersMu.Lock()
 	if p, ok := s.players[playerID]; ok {
 		p.IsPlaying = false
 	}
 	s.playersMu.Unlock()
 
-	s.logger.Info("Stream ended from Music Assistant", "player_id", playerID)
-	s.terminatePlayerCall(playerID, true)
+	val, ok := s.activeCalls.Load(playerID)
+	if !ok {
+		return
+	}
+	call := val.(*activeCallState)
+
+	// Instantly clear any queued audio frames so playback stops immediately with 0ms delay
+	call.mu.Lock()
+	call.buffer = nil
+	call.mu.Unlock()
+
+	if call.rtpSession != nil {
+		call.rtpSession.ClearBuffer()
+	}
+
+	lingerDelay := time.Duration(s.config.IdleHangupDelayMs) * time.Millisecond
+	if lingerDelay <= 0 {
+		s.terminatePlayerCall(playerID, true)
+		return
+	}
+
+	call.mu.Lock()
+	if call.session.GetState() != domain.StateActive && call.session.GetState() != domain.StateDialing {
+		call.mu.Unlock()
+		return
+	}
+
+	if call.lingerTimer != nil {
+		call.lingerTimer.Stop()
+	}
+
+	call.lingerTimer = time.AfterFunc(lingerDelay, func() {
+		call.mu.Lock()
+		if call.lingerTimer == nil {
+			call.mu.Unlock()
+			return
+		}
+		call.lingerTimer = nil
+		call.mu.Unlock()
+
+		s.logger.Info("Idle linger timeout expired, terminating SIP call", "player_id", playerID)
+		s.terminatePlayerCall(playerID, true)
+	})
+	call.mu.Unlock()
 }
 
 // OnVolumeChange updates player volume gain.
@@ -348,6 +475,13 @@ func (s *BridgeService) terminatePlayerCallSync(playerID string, releaseArbiter 
 	}
 	call := val.(*activeCallState)
 
+	call.mu.Lock()
+	if call.lingerTimer != nil {
+		call.lingerTimer.Stop()
+		call.lingerTimer = nil
+	}
+	call.mu.Unlock()
+
 	call.session.SetState(domain.StateTerminating)
 	call.session.Close()
 
@@ -373,6 +507,13 @@ func (s *BridgeService) terminatePlayerCall(playerID string, releaseArbiter bool
 		return
 	}
 	call := val.(*activeCallState)
+
+	call.mu.Lock()
+	if call.lingerTimer != nil {
+		call.lingerTimer.Stop()
+		call.lingerTimer = nil
+	}
+	call.mu.Unlock()
 
 	call.session.SetState(domain.StateTerminating)
 	call.session.Close()

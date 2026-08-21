@@ -93,6 +93,11 @@ func (m *mockRTPSession) PushAudio(chunk domain.AudioChunk, volumePercent int) e
 	m.chunksPushed++
 	return nil
 }
+func (m *mockRTPSession) ClearBuffer() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.chunksPushed = 0
+}
 func (m *mockRTPSession) DrainAndClose(drainDelay time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -328,6 +333,200 @@ func TestBridgeService_RemoteHangup(t *testing.T) {
 	if _, ok := bridge.activeCalls.Load("player-desk"); ok {
 		t.Errorf("expected active call to terminate after remote hangup")
 	}
+
+	bridge.Shutdown()
+}
+
+func TestBridgeService_SeekAndTrackChange_ReusesCall(t *testing.T) {
+	sipCaller := &mockSIPCaller{}
+	rtpStreamer := &mockRTPStreamer{}
+	ingress := &mockIngress{}
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+
+	bridge := NewBridgeService(
+		nil,
+		BridgeConfig{
+			DefaultBufferMode: domain.BufferModeLive,
+			PickupBufferMs:    500,
+			DrainDelayMs:      50,
+			IdleHangupDelayMs: 2000,
+		},
+		arbiter,
+		sipCaller,
+		rtpStreamer,
+		ingress,
+	)
+
+	playerConfigs := []domain.PlayerConfig{
+		{
+			ID:         "player-music",
+			SIPTarget:  "sip:101@192.168.1.50",
+			Codec:      domain.CodecG722,
+			BufferMode: domain.BufferModeLive,
+		},
+	}
+	_ = bridge.RegisterPlayers(playerConfigs)
+
+	// 1. Initial track playback
+	bridge.OnStreamStart("player-music", domain.StreamMetadata{Title: "Song 1"})
+	time.Sleep(30 * time.Millisecond)
+
+	sipCaller.mu.Lock()
+	if sipCaller.dialCount != 1 {
+		t.Fatalf("expected 1 dial initially, got %d", sipCaller.dialCount)
+	}
+	sipCaller.mu.Unlock()
+
+	// Push some audio
+	chunk := domain.AudioChunk{
+		Samples:    make([]int32, 960),
+		SampleRate: 48000,
+		Channels:   1,
+		BitDepth:   16,
+	}
+	bridge.OnAudioChunk("player-music", chunk)
+
+	// 2. User performs seek in Music Assistant
+	// MA sends StreamClear, StreamEnd, then StreamStart for the new position
+	bridge.OnStreamClear("player-music")
+	bridge.OnStreamEnd("player-music")
+	time.Sleep(20 * time.Millisecond)
+
+	// StreamStart for seeked position
+	bridge.OnStreamStart("player-music", domain.StreamMetadata{Title: "Song 1 (Seeked)"})
+	time.Sleep(30 * time.Millisecond)
+
+	// Verify SIP call was NOT hung up and NO second INVITE was sent
+	sipCaller.mu.Lock()
+	if sipCaller.dialCount != 1 {
+		t.Errorf("expected still 1 dial after seek, got %d", sipCaller.dialCount)
+	}
+	sipCaller.mu.Unlock()
+
+	// Verify RTP streamer was not asked to create a second session
+	rtpStreamer.mu.Lock()
+	if len(rtpStreamer.sessions) != 1 {
+		t.Errorf("expected 1 RTP session, got %d", len(rtpStreamer.sessions))
+	}
+	rtpStreamer.mu.Unlock()
+
+	// Push audio after seek
+	bridge.OnAudioChunk("player-music", chunk)
+
+	// Verify active call is still intact
+	if _, ok := bridge.activeCalls.Load("player-music"); !ok {
+		t.Errorf("expected player-music to remain in activeCalls")
+	}
+
+	bridge.Shutdown()
+}
+
+func TestBridgeService_IdleHangupDelay_Expires(t *testing.T) {
+	sipCaller := &mockSIPCaller{}
+	rtpStreamer := &mockRTPStreamer{}
+	ingress := &mockIngress{}
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+
+	bridge := NewBridgeService(
+		nil,
+		BridgeConfig{
+			DefaultBufferMode: domain.BufferModeLive,
+			PickupBufferMs:    500,
+			DrainDelayMs:      20,
+			IdleHangupDelayMs: 60, // 60ms linger
+		},
+		arbiter,
+		sipCaller,
+		rtpStreamer,
+		ingress,
+	)
+
+	playerConfigs := []domain.PlayerConfig{
+		{
+			ID:         "player-music",
+			SIPTarget:  "sip:101@192.168.1.50",
+			Codec:      domain.CodecG722,
+			BufferMode: domain.BufferModeLive,
+		},
+	}
+	_ = bridge.RegisterPlayers(playerConfigs)
+
+	bridge.OnStreamStart("player-music", domain.StreamMetadata{Title: "Song 1"})
+	time.Sleep(30 * time.Millisecond)
+
+	// Stream ends
+	bridge.OnStreamEnd("player-music")
+
+	// Verify call is still active during linger
+	time.Sleep(20 * time.Millisecond)
+	if _, ok := bridge.activeCalls.Load("player-music"); !ok {
+		t.Errorf("expected call to linger during IdleHangupDelay")
+	}
+
+	// Wait for linger timer (60ms) to expire + drain
+	time.Sleep(100 * time.Millisecond)
+	if _, ok := bridge.activeCalls.Load("player-music"); ok {
+		t.Errorf("expected call to terminate after IdleHangupDelay expired")
+	}
+
+	bridge.Shutdown()
+}
+
+func TestBridgeService_TrackChange_StateStopped_ReusesCall(t *testing.T) {
+	sipCaller := &mockSIPCaller{}
+	rtpStreamer := &mockRTPStreamer{}
+	ingress := &mockIngress{}
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+
+	bridge := NewBridgeService(
+		nil,
+		BridgeConfig{
+			DefaultBufferMode: domain.BufferModeLive,
+			PickupBufferMs:    500,
+			DrainDelayMs:      50,
+			IdleHangupDelayMs: 2000,
+		},
+		arbiter,
+		sipCaller,
+		rtpStreamer,
+		ingress,
+	)
+
+	playerConfigs := []domain.PlayerConfig{
+		{
+			ID:         "player-music",
+			SIPTarget:  "sip:101@192.168.1.50",
+			Codec:      domain.CodecG722,
+			BufferMode: domain.BufferModeLive,
+		},
+	}
+	_ = bridge.RegisterPlayers(playerConfigs)
+
+	// 1. Initial track playback
+	bridge.OnStreamStart("player-music", domain.StreamMetadata{Title: "Track 1"})
+	bridge.OnPlaybackState("player-music", "playing")
+	time.Sleep(30 * time.Millisecond)
+
+	// 2. Track 1 finishes -> MA sends stream end and stopped state before starting Track 2
+	bridge.OnStreamEnd("player-music")
+	bridge.OnPlaybackState("player-music", "stopped")
+	time.Sleep(30 * time.Millisecond)
+
+	// Call should still be alive in linger state
+	if _, ok := bridge.activeCalls.Load("player-music"); !ok {
+		t.Fatalf("expected call to stay alive during track transition linger")
+	}
+
+	// 3. Track 2 begins
+	bridge.OnStreamStart("player-music", domain.StreamMetadata{Title: "Track 2"})
+	bridge.OnPlaybackState("player-music", "playing")
+	time.Sleep(30 * time.Millisecond)
+
+	sipCaller.mu.Lock()
+	if sipCaller.dialCount != 1 {
+		t.Errorf("expected only 1 SIP dial across track change, got %d", sipCaller.dialCount)
+	}
+	sipCaller.mu.Unlock()
 
 	bridge.Shutdown()
 }

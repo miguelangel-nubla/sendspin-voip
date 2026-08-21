@@ -355,6 +355,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 
 			case <-client.StreamClear:
 				ing.logger.Debug("Sendspin stream clear received (flushing buffer)", "player_id", w.cfg.ID)
+				w.handler.OnStreamClear(w.cfg.ID)
 
 			case stateMsg := <-client.ServerState:
 				if stateMsg.Metadata != nil {
@@ -365,11 +366,21 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 						Album:       ptrString(stateMsg.Metadata.Album),
 						StreamTitle: ptrString(stateMsg.Metadata.Title),
 					}
+					if stateMsg.Metadata.Progress != nil {
+						if stateMsg.Metadata.Progress.PlaybackSpeed == 0 {
+							w.handler.OnPlaybackState(w.cfg.ID, "paused")
+						} else if stateMsg.Metadata.Progress.PlaybackSpeed > 0 {
+							w.handler.OnPlaybackState(w.cfg.ID, "playing")
+						}
+					}
 				}
 
 			case grpMsg := <-client.GroupUpdate:
 				isGrouped := grpMsg.GroupID != nil && *grpMsg.GroupID != ""
 				w.handler.OnGroupUpdate(w.cfg.ID, isGrouped)
+				if grpMsg.PlaybackState != nil && *grpMsg.PlaybackState != "" {
+					w.handler.OnPlaybackState(w.cfg.ID, *grpMsg.PlaybackState)
+				}
 
 			case cmd := <-client.ControlMsgs:
 				if cmd.Command == "volume" {

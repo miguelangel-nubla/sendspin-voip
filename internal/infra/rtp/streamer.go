@@ -96,7 +96,7 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 		ssrc:       ssrc,
 		seq:        1,
 		timestamp:  1000,
-		audioQueue: make(chan []byte, 500), // 20ms packet buffer
+		audioQueue: make(chan []byte, 50), // 20ms packet buffer (up to 1s)
 		stopChan:   make(chan struct{}),
 	}
 
@@ -249,6 +249,22 @@ func (s *Session) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 	}
 
 	return nil
+}
+
+// ClearBuffer flushes any pending PCM samples and queued RTP packets.
+func (s *Session) ClearBuffer() {
+	s.mu.Lock()
+	s.pcmBuffer = nil
+	s.mu.Unlock()
+
+	// Drain all pending packets from audioQueue
+	for {
+		select {
+		case <-s.audioQueue:
+		default:
+			return
+		}
+	}
 }
 
 // DrainAndClose waits for drainDelay to allow the remote jitter buffer to play out, then closes the socket.

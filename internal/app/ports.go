@@ -48,6 +48,8 @@ type RTPSession interface {
 	SetCodec(codec domain.Codec)
 	// PushAudio sends raw PCM samples (int32) into the transcoder and RTP pacer.
 	PushAudio(chunk domain.AudioChunk, volumePercent int) error
+	// ClearBuffer flushes any buffered PCM samples and queued RTP packets (e.g. on seek).
+	ClearBuffer()
 	// DrainAndClose waits for drainDelay then closes the RTP socket.
 	DrainAndClose(drainDelay time.Duration) error
 }
@@ -72,6 +74,8 @@ type PlayerIngressPort interface {
 // PlayerEventHandler defines the callbacks triggered by incoming Sendspin player events.
 type PlayerEventHandler interface {
 	OnStreamStart(playerID string, meta domain.StreamMetadata)
+	OnStreamClear(playerID string)
+	OnPlaybackState(playerID string, state string)
 	OnAudioChunk(playerID string, chunk domain.AudioChunk)
 	OnStreamEnd(playerID string)
 	OnVolumeChange(playerID string, volume int, muted bool)
