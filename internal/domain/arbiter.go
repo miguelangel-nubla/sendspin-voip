@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -13,6 +14,26 @@ const (
 	ConflictPolicyPreemptAlways        ConflictPolicy = "preempt_always"            // Always preempt if new priority >= current
 	ConflictPolicyBusy                 ConflictPolicy = "busy"                      // Reject new playback if target is busy
 )
+
+// ParseConflictPolicy normalizes and validates a target conflict policy.
+// An empty value selects the default (preempt_for_announcements).
+//
+// Validating this matters: an unrecognised policy matches no case in
+// RequestTarget's switch, so shouldPreempt stays false and the arbiter rejects
+// every call to a busy target. A typo in the config silently breaks playback
+// rather than failing at startup.
+func ParseConflictPolicy(s string) (ConflictPolicy, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "preempt_for_announcements":
+		return ConflictPolicyPreemptAnnouncements, nil
+	case "preempt_always":
+		return ConflictPolicyPreemptAlways, nil
+	case "busy":
+		return ConflictPolicyBusy, nil
+	default:
+		return "", fmt.Errorf("invalid target_conflict_policy %q (allowed: preempt_for_announcements, preempt_always, busy)", s)
+	}
+}
 
 // TargetArbiter manages concurrency and preemption for physical SIP targets.
 type TargetArbiter struct {

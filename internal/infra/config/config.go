@@ -15,12 +15,29 @@ import (
 
 // AppConfig represents the root application configuration.
 type AppConfig struct {
-	LogLevel string         `yaml:"log_level" json:"log_level"`
-	HTTP     HTTPConfig     `yaml:"http" json:"http"`
-	SIP      SIPConfig      `yaml:"sip" json:"sip"`
-	Sendspin SendspinConfig `yaml:"sendspin" json:"sendspin"`
-	Bridge   BridgeConfig   `yaml:"bridge" json:"bridge"`
-	Players  []PlayerConfig `yaml:"players" json:"players"`
+	LogLevel string `yaml:"log_level" json:"log_level"`
+	// StateFile is where per-player volume/mute state is persisted. Empty means
+	// "pick a sensible default" — see DefaultStateFilePath.
+	StateFile string         `yaml:"state_file" json:"state_file"`
+	HTTP      HTTPConfig     `yaml:"http" json:"http"`
+	SIP       SIPConfig      `yaml:"sip" json:"sip"`
+	Sendspin  SendspinConfig `yaml:"sendspin" json:"sendspin"`
+	Bridge    BridgeConfig   `yaml:"bridge" json:"bridge"`
+	Players   []PlayerConfig `yaml:"players" json:"players"`
+}
+
+// haDataDir is the persistent volume Home Assistant mounts into every add-on.
+const haDataDir = "/data"
+
+// DefaultStateFilePath returns where player state should live when the config
+// does not say. Inside a Home Assistant add-on the working directory is not
+// persisted across restarts or upgrades, but /data is — so prefer it when
+// present. Otherwise fall back to the working directory.
+func DefaultStateFilePath() string {
+	if info, err := os.Stat(haDataDir); err == nil && info.IsDir() {
+		return filepath.Join(haDataDir, "sendspin-voip-state.json")
+	}
+	return "sendspin-voip-state.json"
 }
 
 // HTTPConfig defines the HTTP server options for web UI and streams debug info.
@@ -172,6 +189,9 @@ func applyEnvOverrides(cfg *AppConfig) {
 	if v := os.Getenv("HTTP_API_TOKEN"); v != "" {
 		cfg.HTTP.APIToken = v
 	}
+	if v := os.Getenv("STATE_FILE"); v != "" {
+		cfg.StateFile = v
+	}
 	if v := os.Getenv("HTTP_ENABLE_PPROF"); v != "" {
 		cfg.HTTP.EnablePprof = strings.EqualFold(v, "true") || v == "1"
 	}
@@ -194,7 +214,27 @@ func applyEnvOverrides(cfg *AppConfig) {
 		cfg.Sendspin.Server = v
 	}
 	if v := os.Getenv("DEFAULT_BUFFER_MODE"); v != "" {
-		cfg.Bridge.DefaultBufferMode = domain.BufferMode(v)
+		// Left unparsed, a typo here produces a BufferMode that is neither
+		// "announcement" nor "live". The bridge then treats every pre-answer
+		// chunk as non-announcement and discards it, so announcements lose their
+		// opening. Validate() reports the bad value instead.
+		cfg.Bridge.DefaultBufferMode = domain.BufferMode(strings.ToLower(strings.TrimSpace(v)))
+	}
+	if v := os.Getenv("TARGET_CONFLICT_POLICY"); v != "" {
+		cfg.Bridge.ConflictPolicy = domain.ConflictPolicy(strings.ToLower(strings.TrimSpace(v)))
+	}
+	if v := os.Getenv("DRAIN_DELAY_MS"); v != "" {
+		if val, err := strconv.Atoi(v); err == nil {
+			cfg.Bridge.DrainDelayMs = val
+		}
+	}
+	if v := os.Getenv("SIP_LOCAL_SIP_PORT"); v != "" {
+		if val, err := strconv.Atoi(v); err == nil {
+			cfg.SIP.LocalSIPPort = val
+		}
+	}
+	if v := os.Getenv("SIP_TRANSPORT"); v != "" {
+		cfg.SIP.Transport = v
 	}
 	if v := os.Getenv("PICKUP_BUFFER_MS"); v != "" {
 		if val, err := strconv.Atoi(v); err == nil {
@@ -208,8 +248,56 @@ func applyEnvOverrides(cfg *AppConfig) {
 	}
 }
 
-// Validate checks configuration sanity.
+// Validate checks configuration sanity and normalizes enum-valued fields.
+//
+// Every enum below is consumed by a switch that silently does nothing on an
+// unrecognised value, so a typo used to produce a service that starts happily
+// and then misbehaves (no preemption, no auto-answer header, announcements
+// clipped). Failing at startup with the allowed values is far kinder.
 func (c *AppConfig) Validate() error {
+	if c.StateFile == "" {
+		c.StateFile = DefaultStateFilePath()
+	}
+
+	if c.SIP.Transport == "" {
+		c.SIP.Transport = "udp"
+	}
+	switch strings.ToLower(strings.TrimSpace(c.SIP.Transport)) {
+	case "udp", "tcp":
+		c.SIP.Transport = strings.ToLower(strings.TrimSpace(c.SIP.Transport))
+	default:
+		return fmt.Errorf("invalid sip.transport %q (allowed: udp, tcp)", c.SIP.Transport)
+	}
+
+	if c.SIP.LocalSIPPort <= 0 || c.SIP.LocalSIPPort > 65535 {
+		return fmt.Errorf("sip.local_sip_port must be between 1 and 65535, got %d", c.SIP.LocalSIPPort)
+	}
+	if c.SIP.RTPPortMin <= 0 || c.SIP.RTPPortMin > 65535 {
+		return fmt.Errorf("sip.rtp_port_min must be between 1 and 65535, got %d", c.SIP.RTPPortMin)
+	}
+	if c.SIP.RTPPortMax <= c.SIP.RTPPortMin || c.SIP.RTPPortMax > 65535 {
+		return fmt.Errorf("sip.rtp_port_max (%d) must be greater than sip.rtp_port_min (%d) and at most 65535",
+			c.SIP.RTPPortMax, c.SIP.RTPPortMin)
+	}
+
+	preset, err := domain.ParseAutoAnswerPreset(string(c.SIP.AutoAnswerPreset))
+	if err != nil {
+		return fmt.Errorf("sip.auto_answer_preset: %w", err)
+	}
+	c.SIP.AutoAnswerPreset = preset
+
+	mode, err := domain.ParseBufferMode(string(c.Bridge.DefaultBufferMode))
+	if err != nil {
+		return fmt.Errorf("bridge.default_buffer_mode: %w", err)
+	}
+	c.Bridge.DefaultBufferMode = mode
+
+	policy, err := domain.ParseConflictPolicy(string(c.Bridge.ConflictPolicy))
+	if err != nil {
+		return fmt.Errorf("bridge.%w", err)
+	}
+	c.Bridge.ConflictPolicy = policy
+
 	if len(c.Players) == 0 {
 		return fmt.Errorf("at least one player must be configured in 'players'")
 	}
@@ -236,23 +324,26 @@ func (c *AppConfig) Validate() error {
 func (c *AppConfig) ToDomainPlayerConfigs() ([]domain.PlayerConfig, error) {
 	result := make([]domain.PlayerConfig, len(c.Players))
 	for i, p := range c.Players {
+		// Empty codec = auto (discovery order); do not force a default.
 		codec, err := domain.ParseCodec(p.Codec)
-		if err != nil && p.Codec != "" {
+		if err != nil {
 			return nil, fmt.Errorf("player %s: %w", p.ID, err)
 		}
-		// Empty codec = auto (discovery order); do not force a default.
 
 		bMode, err := domain.ParseBufferMode(p.BufferMode)
 		if err != nil {
 			return nil, fmt.Errorf("player %s: %w", p.ID, err)
 		}
 
-		autoAnswer := p.AutoAnswer
-		if autoAnswer == "" {
-			autoAnswer = c.SIP.AutoAnswerPreset
-			if autoAnswer == "" {
-				autoAnswer = domain.AutoAnswerDefault
+		autoAnswer := c.SIP.AutoAnswerPreset
+		if p.AutoAnswer != "" {
+			autoAnswer, err = domain.ParseAutoAnswerPreset(string(p.AutoAnswer))
+			if err != nil {
+				return nil, fmt.Errorf("player %s: %w", p.ID, err)
 			}
+		}
+		if autoAnswer == "" {
+			autoAnswer = domain.AutoAnswerDefault
 		}
 
 		vol := p.DefaultVolume

@@ -42,6 +42,23 @@ const (
 	AutoAnswerCustom      AutoAnswerPreset = "custom"      // Custom header string
 )
 
+// ParseAutoAnswerPreset normalizes and validates an auto-answer preset.
+// An empty value selects the default preset. An unrecognised preset matches no
+// case in buildAutoAnswerHeaders, so the INVITE goes out with no auto-answer
+// header at all and the phone simply rings — validate it at startup instead of
+// silently degrading.
+func ParseAutoAnswerPreset(s string) (AutoAnswerPreset, error) {
+	switch p := AutoAnswerPreset(strings.ToLower(strings.TrimSpace(s))); p {
+	case "":
+		return AutoAnswerDefault, nil
+	case AutoAnswerDefault, AutoAnswerIntercom, AutoAnswerYealink, AutoAnswerGrandstream,
+		AutoAnswerSnom, AutoAnswerCallInfo, AutoAnswerPAutoAnswer, AutoAnswerNone, AutoAnswerCustom:
+		return p, nil
+	default:
+		return "", fmt.Errorf("invalid auto_answer preset %q (allowed: default, intercom, yealink, grandstream, snom, call_info, p_auto, none, custom)", s)
+	}
+}
+
 // PlayerConfig defines the configuration for a single virtual Sendspin player.
 type PlayerConfig struct {
 	ID                     string           `yaml:"id" json:"id"`
