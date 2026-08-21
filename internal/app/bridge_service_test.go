@@ -205,6 +205,7 @@ func TestBridgeService_LifecycleAndPlayback(t *testing.T) {
 		sipCaller,
 		rtpStreamer,
 		ingress,
+		nil,
 	)
 
 	// 1. Register players
@@ -293,6 +294,7 @@ func TestBridgeService_Preemption(t *testing.T) {
 		sipCaller,
 		rtpStreamer,
 		ingress,
+		nil,
 	)
 
 	playerConfigs := []domain.PlayerConfig{
@@ -351,6 +353,7 @@ func TestBridgeService_RemoteHangup(t *testing.T) {
 		sipCaller,
 		rtpStreamer,
 		ingress,
+		nil,
 	)
 
 	playerConfigs := []domain.PlayerConfig{
@@ -402,6 +405,7 @@ func TestBridgeService_SeekAndTrackChange_ReusesCall(t *testing.T) {
 		sipCaller,
 		rtpStreamer,
 		ingress,
+		nil,
 	)
 
 	playerConfigs := []domain.PlayerConfig{
@@ -486,6 +490,7 @@ func TestBridgeService_IdleHangupDelay_Expires(t *testing.T) {
 		sipCaller,
 		rtpStreamer,
 		ingress,
+		nil,
 	)
 
 	playerConfigs := []domain.PlayerConfig{
@@ -537,6 +542,7 @@ func TestBridgeService_TrackChange_StateStopped_ReusesCall(t *testing.T) {
 		sipCaller,
 		rtpStreamer,
 		ingress,
+		nil,
 	)
 
 	playerConfigs := []domain.PlayerConfig{
@@ -596,6 +602,7 @@ func TestBridgeService_GetStreamsDebugInfo(t *testing.T) {
 		sipCaller,
 		rtpStreamer,
 		ingress,
+		nil,
 	)
 
 	playerConfigs := []domain.PlayerConfig{
@@ -642,3 +649,84 @@ func TestBridgeService_GetStreamsDebugInfo(t *testing.T) {
 
 	bridge.Shutdown()
 }
+
+type mockStateStore struct {
+	states map[string]PlayerStateRecord
+}
+
+func (m *mockStateStore) GetPlayerState(playerID string) (PlayerStateRecord, bool) {
+	if m.states == nil {
+		return PlayerStateRecord{}, false
+	}
+	rec, ok := m.states[playerID]
+	return rec, ok
+}
+
+func (m *mockStateStore) SetPlayerState(playerID string, state PlayerStateRecord) error {
+	if m.states == nil {
+		m.states = make(map[string]PlayerStateRecord)
+	}
+	m.states[playerID] = state
+	return nil
+}
+
+func TestBridgeService_StateStorePersistence(t *testing.T) {
+	sipCaller := &mockSIPCaller{}
+	rtpStreamer := &mockRTPStreamer{}
+	ingress := &mockIngress{}
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+	store := &mockStateStore{
+		states: map[string]PlayerStateRecord{
+			"player-desk": {Volume: 58, Muted: true},
+		},
+	}
+
+	bridge := NewBridgeService(
+		nil,
+		BridgeConfig{
+			DefaultBufferMode: domain.BufferModeAnnouncement,
+			PickupBufferMs:    500,
+			DrainDelayMs:      50,
+		},
+		arbiter,
+		sipCaller,
+		rtpStreamer,
+		ingress,
+		store,
+	)
+
+	playerConfigs := []domain.PlayerConfig{
+		{
+			ID:            "player-desk",
+			SIPTarget:     "sip:101@192.168.1.50",
+			Codec:         domain.CodecG722,
+			DefaultVolume: 100, // Should be overridden by store value 58
+		},
+	}
+
+	if err := bridge.RegisterPlayers(playerConfigs); err != nil {
+		t.Fatalf("RegisterPlayers failed: %v", err)
+	}
+
+	// Verify restored volume and mute state
+	bridge.playersMu.RLock()
+	p := bridge.players["player-desk"]
+	if p.Volume != 58 || !p.IsMuted {
+		t.Errorf("expected restored volume 58 and muted true, got vol=%d muted=%v", p.Volume, p.IsMuted)
+	}
+	bridge.playersMu.RUnlock()
+
+	// Update volume and verify store updated
+	bridge.OnVolumeChange("player-desk", 65)
+	if store.states["player-desk"].Volume != 65 {
+		t.Errorf("expected store volume 65, got %d", store.states["player-desk"].Volume)
+	}
+
+	bridge.OnMuteChange("player-desk", false)
+	if store.states["player-desk"].Muted != false {
+		t.Errorf("expected store muted false")
+	}
+
+	bridge.Shutdown()
+}
+

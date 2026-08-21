@@ -379,10 +379,11 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		supportedFormats, supportCodecs, supportSampleRates, supportChannels := BuildSupportedFormatsForCodecs(w.codecs, w.cfg.Codec)
 
 		client := protocol.NewClient(protocol.Config{
-			ServerAddr: serverAddr,
-			ClientID:   w.cfg.ID,
-			Name:       w.cfg.Name,
-			Version:    1,
+			ServerAddr:     serverAddr,
+			ClientID:       w.cfg.ID,
+			Name:           w.cfg.Name,
+			Version:        1,
+			SupportedRoles: []string{"player@v1", "metadata@v1"},
 			PlayerV1Support: protocol.PlayerV1Support{
 				SupportedFormats:   supportedFormats,
 				BufferCapacity:     1048576,
@@ -437,7 +438,12 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		w.statsMu.Unlock()
 
 		w.client = client
-		ing.logger.Info("Player client successfully connected to Music Assistant", "player_id", w.cfg.ID)
+		w.statsMu.RLock()
+		initVol := w.currentVolume
+		initMuted := w.isMuted
+		w.statsMu.RUnlock()
+		_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: initVol, Muted: initMuted})
+		ing.logger.Info("Player client successfully connected to Music Assistant", "player_id", w.cfg.ID, "volume", initVol)
 
 		var currentMeta domain.StreamMetadata
 		var currentCodec = primaryCodec
@@ -500,7 +506,11 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					"bit_depth", currentBitDepth,
 					"title", currentMeta.Title,
 				)
-				_ = client.SendState(protocol.PlayerState{State: "synchronized"})
+				w.statsMu.RLock()
+				vol := w.currentVolume
+				muted := w.isMuted
+				w.statsMu.RUnlock()
+				_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
 				w.handler.OnStreamStart(w.cfg.ID, currentMeta)
 
 			case <-client.StreamEnd:
@@ -544,12 +554,18 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				if cmd.Command == "volume" {
 					w.statsMu.Lock()
 					w.currentVolume = cmd.Volume
+					vol := w.currentVolume
+					muted := w.isMuted
 					w.statsMu.Unlock()
+					_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
 					w.handler.OnVolumeChange(w.cfg.ID, cmd.Volume)
 				} else if cmd.Command == "mute" {
 					w.statsMu.Lock()
 					w.isMuted = cmd.Mute
+					vol := w.currentVolume
+					muted := w.isMuted
 					w.statsMu.Unlock()
+					_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
 					w.handler.OnMuteChange(w.cfg.ID, cmd.Mute)
 				}
 

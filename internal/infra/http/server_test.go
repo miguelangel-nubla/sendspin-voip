@@ -80,6 +80,7 @@ func TestHTTPServer_Endpoints(t *testing.T) {
 		sipCaller,
 		rtpStreamer,
 		ingress,
+		nil,
 	)
 
 	_ = bridge.RegisterPlayers([]domain.PlayerConfig{
@@ -177,6 +178,7 @@ func TestHTTPServer_APITokenAuth(t *testing.T) {
 		sipCaller,
 		&dummyRTPStreamer{},
 		&dummyIngress{},
+		nil,
 	)
 
 	srv := NewServer(nil, ServerConfig{
@@ -217,6 +219,7 @@ func TestHTTPServer_PprofDisabledByDefault(t *testing.T) {
 		sipCaller,
 		&dummyRTPStreamer{},
 		&dummyIngress{},
+		nil,
 	)
 	srv := NewServer(nil, ServerConfig{Listen: ":8080"}, bridge, sipCaller)
 

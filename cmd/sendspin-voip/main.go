@@ -20,6 +20,7 @@ import (
 	"github.com/miguelangel-nubla/sendspin-voip/internal/infra/rtp"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/infra/sendspin"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/infra/sip"
+	"github.com/miguelangel-nubla/sendspin-voip/internal/infra/state"
 )
 
 var (
@@ -98,6 +99,7 @@ func main() {
 	})
 
 	arbiter := domain.NewTargetArbiter(cfg.Bridge.ConflictPolicy)
+	stateStore := state.NewFileStore("sendspin-voip-state.json")
 	bridgeService := app.NewBridgeService(
 		logger,
 		cfg.ToBridgeConfig(),
@@ -105,6 +107,7 @@ func main() {
 		sipCaller,
 		rtpStreamer,
 		ingress,
+		stateStore,
 	)
 
 	// 4. Start SIP Stack

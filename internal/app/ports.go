@@ -222,3 +222,16 @@ type PlayerEventHandler interface {
 	OnGroupUpdate(playerID string, isGrouped bool)
 }
 
+// PlayerStateRecord holds persistent player preferences (such as volume and mute).
+type PlayerStateRecord struct {
+	Volume int  `json:"volume"`
+	Muted  bool `json:"muted"`
+}
+
+// StateStorePort defines persistence for player state across restarts.
+type StateStorePort interface {
+	GetPlayerState(playerID string) (PlayerStateRecord, bool)
+	SetPlayerState(playerID string, state PlayerStateRecord) error
+}
+
+

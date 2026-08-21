@@ -40,6 +40,7 @@ type BridgeService struct {
 	sipCaller   SIPCallerPort
 	rtpStreamer RTPStreamerPort
 	ingress     PlayerIngressPort
+	stateStore  StateStorePort
 
 	playersMu   sync.RWMutex
 	players     map[string]*domain.Player
@@ -55,6 +56,7 @@ func NewBridgeService(
 	sipCaller SIPCallerPort,
 	rtpStreamer RTPStreamerPort,
 	ingress PlayerIngressPort,
+	stateStore StateStorePort,
 ) *BridgeService {
 	if logger == nil {
 		logger = slog.Default()
@@ -81,6 +83,7 @@ func NewBridgeService(
 		sipCaller:   sipCaller,
 		rtpStreamer: rtpStreamer,
 		ingress:     ingress,
+		stateStore:  stateStore,
 		players:     make(map[string]*domain.Player),
 	}
 }
@@ -88,11 +91,24 @@ func NewBridgeService(
 // RegisterPlayers registers configured players and starts dynamic downstream discovery.
 func (s *BridgeService) RegisterPlayers(configs []domain.PlayerConfig) error {
 	s.playersMu.Lock()
-	for _, cfg := range configs {
+	for i, cfg := range configs {
+		if s.stateStore != nil {
+			if rec, ok := s.stateStore.GetPlayerState(cfg.ID); ok {
+				if rec.Volume > 0 && rec.Volume <= 100 {
+					cfg.DefaultVolume = rec.Volume
+					configs[i].DefaultVolume = rec.Volume
+				}
+			}
+		}
 		p, err := domain.NewPlayer(cfg)
 		if err != nil {
 			s.playersMu.Unlock()
 			return fmt.Errorf("invalid player config %s: %w", cfg.ID, err)
+		}
+		if s.stateStore != nil {
+			if rec, ok := s.stateStore.GetPlayerState(cfg.ID); ok {
+				p.IsMuted = rec.Muted
+			}
 		}
 		s.players[p.Config.ID] = p
 	}
@@ -524,24 +540,36 @@ func (s *BridgeService) OnVolumeChange(playerID string, volume int) {
 		volume = 0
 	}
 
+	var isMuted bool
 	s.playersMu.Lock()
 	if p, ok := s.players[playerID]; ok {
 		p.Volume = volume
+		isMuted = p.IsMuted
 		s.logger.Debug("Player volume changed", "player_id", playerID, "volume", volume)
 	}
 	s.playersMu.Unlock()
+
+	if s.stateStore != nil {
+		_ = s.stateStore.SetPlayerState(playerID, PlayerStateRecord{Volume: volume, Muted: isMuted})
+	}
 
 	s.flushActiveRTPBuffer(playerID)
 }
 
 // OnMuteChange updates player mute status.
 func (s *BridgeService) OnMuteChange(playerID string, muted bool) {
+	var curVol int = 100
 	s.playersMu.Lock()
 	if p, ok := s.players[playerID]; ok {
 		p.IsMuted = muted
+		curVol = p.Volume
 		s.logger.Debug("Player mute state changed", "player_id", playerID, "muted", muted)
 	}
 	s.playersMu.Unlock()
+
+	if s.stateStore != nil {
+		_ = s.stateStore.SetPlayerState(playerID, PlayerStateRecord{Volume: curVol, Muted: muted})
+	}
 
 	s.flushActiveRTPBuffer(playerID)
 }
