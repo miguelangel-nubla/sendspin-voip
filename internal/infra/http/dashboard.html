@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>sendspin-voip | Streams & Debug Dashboard</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(22, 29, 47, 0.75);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --card-hover: rgba(30, 41, 67, 0.9);
+      --primary: #38bdf8;
+      --primary-glow: rgba(56, 189, 248, 0.25);
+      --success: #10b981;
+      --success-glow: rgba(16, 185, 129, 0.25);
+      --warning: #f59e0b;
+      --warning-glow: rgba(245, 158, 11, 0.25);
+      --danger: #ef4444;
+      --muted: #94a3b8;
+      --text: #f1f5f9;
+      --text-dim: #cbd5e1;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(at 10% 10%, rgba(56, 189, 248, 0.08) 0px, transparent 50%),
+        radial-gradient(at 90% 90%, rgba(139, 92, 246, 0.08) 0px, transparent 50%);
+      background-attachment: fixed;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+      min-height: 100vh;
+      padding: 24px 20px;
+    }
+
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    /* Top Header */
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 24px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #0284c7, #8b5cf6);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 14px var(--primary-glow);
+    }
+
+    .brand-logo svg {
+      width: 24px;
+      height: 24px;
+      fill: #fff;
+    }
+
+    .brand-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: linear-gradient(90deg, #f8fafc, #94a3b8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .brand-subtitle {
+      font-size: 0.8rem;
+      color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    /* Global Info Badges */
+    .system-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .sys-pill {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 0.82rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      backdrop-filter: blur(8px);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .dot.green { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .dot.yellow { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+    .dot.red { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+    .dot.blue { background: var(--primary); box-shadow: 0 0 8px var(--primary); }
+
+    /* Control Controls */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    button.btn, select.select {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+
+    button.btn:hover, select.select:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Nav Links */
+    .nav-links {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .nav-link {
+      font-size: 0.85rem;
+      color: var(--primary);
+      text-decoration: none;
+      padding: 4px 10px;
+      background: rgba(56, 189, 248, 0.08);
+      border-radius: 6px;
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      transition: all 0.15s ease;
+      font-family: var(--font-mono);
+    }
+
+    .nav-link:hover {
+      background: rgba(56, 189, 248, 0.2);
+      color: #fff;
+    }
+
+    /* Stream Cards Grid */
+    .streams-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
+      gap: 20px;
+    }
+
+    @media (max-width: 640px) {
+      .streams-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .stream-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 20px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+      transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .stream-card:hover {
+      border-color: rgba(56, 189, 248, 0.3);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .player-title {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .player-id {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .status-playing {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34d399;
+      animation: pulseGlow 2s infinite;
+    }
+
+    .status-lingering, .status-dialing {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: #fbbf24;
+    }
+
+    .status-idle {
+      background: rgba(148, 163, 184, 0.1);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      color: #94a3b8;
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+      50% { box-shadow: 0 0 12px 2px rgba(16, 185, 129, 0.25); }
+    }
+
+    /* Metadata Bar */
+    .track-meta {
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .track-icon {
+      font-size: 1.2rem;
+    }
+
+    .track-info-text {
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .track-title {
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: #f8fafc;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-artist {
+      font-size: 0.78rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Flow Topology Layout */
+    .flow-topology {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .pipeline-step {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .step-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .step-content {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .step-endpoint {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: #38bdf8;
+      word-break: break-all;
+    }
+
+    .step-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag {
+      background: rgba(255, 255, 255, 0.07);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+    }
+
+    .tag.codec {
+      background: rgba(139, 92, 246, 0.2);
+      color: #c4b5fd;
+      border: 1px solid rgba(139, 92, 246, 0.3);
+    }
+
+    .tag.stat {
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
+    }
+
+    .tag.mode {
+      background: rgba(56, 189, 248, 0.15);
+      color: #7dd3fc;
+    }
+
+    /* Stats Strip */
+    .stats-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--card-border);
+    }
+
+    @media (max-width: 500px) {
+      .stats-strip {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .stat-box {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 6px;
+      padding: 8px 10px;
+      text-align: center;
+    }
+
+    .stat-label {
+      font-size: 0.68rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .stat-val {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #f1f5f9;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+      background: var(--card-bg);
+      border-radius: 14px;
+      border: 1px dashed var(--card-border);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <div class="brand-logo">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title">sendspin-voip</div>
+          <div class="brand-subtitle">Music Assistant to SIP/VoIP Audio Bridge</div>
+        </div>
+      </div>
+
+      <div class="system-bar">
+        <div class="sys-pill" id="sipStatusPill">
+          <span class="dot yellow"></span> SIP: Connecting...
+        </div>
+        <div class="sys-pill" id="systemUptimePill">
+          Uptime: --
+        </div>
+        <div class="controls">
+          <select class="select" id="refreshInterval">
+            <option value="1000">1s auto</option>
+            <option value="2000" selected>2s auto</option>
+            <option value="5000">5s auto</option>
+            <option value="0">Off</option>
+          </select>
+          <button class="btn" id="manualRefreshBtn" title="Refresh Now">↻ Refresh</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="nav-links">
+      <a href="/api/streams" target="_blank" class="nav-link">/api/streams</a>
+      <a href="/api/info" target="_blank" class="nav-link">/api/info</a>
+      <a href="/api/codecs" target="_blank" class="nav-link">/api/codecs</a>
+      <a href="/debug/pprof/" target="_blank" class="nav-link">/debug/pprof/</a>
+    </div>
+
+    <main>
+      <div id="streamsContainer" class="streams-grid">
+        <div class="empty-state">Loading streams and virtual players...</div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    let pollTimer = null;
+
+    function formatBytes(bytes) {
+      if (!bytes || bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+    }
+
+    function formatDuration(sec) {
+      if (!sec || sec <= 0) return '0s';
+      sec = Math.floor(sec);
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      if (m > 0) {
+        return m + 'm ' + s + 's';
+      }
+      return s + 's';
+    }
+
+    async function fetchInfo() {
+      try {
+        const res = await fetch('/api/info');
+        if (!res.ok) return;
+        const info = await res.json();
+
+        // Update SIP status pill
+        const sipPill = document.getElementById('sipStatusPill');
+        if (info.sip && info.sip.registered) {
+          sipPill.innerHTML = '<span class="dot green"></span> SIP: Registered (' + (info.sip.server || info.sip.mode) + ')';
+        } else if (info.sip && info.sip.mode === 'direct') {
+          sipPill.innerHTML = '<span class="dot blue"></span> SIP: Direct Dialing';
+        } else if (info.sip && info.sip.server) {
+          sipPill.innerHTML = '<span class="dot yellow"></span> SIP: Unregistered (' + info.sip.server + ')';
+        } else {
+          sipPill.innerHTML = '<span class="dot green"></span> SIP: Ready';
+        }
+
+        // Update Uptime pill
+        const uptimePill = document.getElementById('systemUptimePill');
+        uptimePill.textContent = 'Uptime: ' + formatDuration(info.uptime_sec) + ' | ' + info.goroutines + ' goroutines';
+      } catch (err) {
+        console.error("Failed to fetch /api/info", err);
+      }
+    }
+
+    async function fetchStreams() {
+      try {
+        const res = await fetch('/api/streams');
+        if (!res.ok) return;
+        const streams = await res.json();
+        renderStreams(streams);
+      } catch (err) {
+        console.error("Failed to fetch /api/streams", err);
+      }
+    }
+
+    function renderStreams(streams) {
+      const container = document.getElementById('streamsContainer');
+      const keys = Object.keys(streams || {});
+
+      if (keys.length === 0) {
+        container.innerHTML = '<div class="empty-state">No virtual Sendspin players configured.</div>';
+        return;
+      }
+
+      let html = '';
+      for (const id of keys) {
+        const st = streams[id];
+        const prod = (st.producers && st.producers.length > 0) ? st.producers[0] : {};
+        const cons = (st.consumers && st.consumers.length > 0) ? st.consumers[0] : {};
+
+        let statusClass = 'status-idle';
+        let statusText = st.state || 'IDLE';
+
+        if (st.state === 'playing' || st.state === 'active') {
+          statusClass = 'status-playing';
+          statusText = 'PLAYING';
+        } else if (st.state === 'lingering') {
+          statusClass = 'status-lingering';
+          statusText = 'LINGERING';
+        } else if (st.state === 'dialing') {
+          statusClass = 'status-dialing';
+          statusText = 'DIALING';
+        }
+
+        const trackTitle = prod.title || prod.track || '';
+        const trackArtist = prod.artist || '';
+        const trackAlbum = prod.album || '';
+
+        html += `
+        <div class="stream-card" id="card-${id}">
+          <div class="card-header">
+            <div>
+              <div class="player-title">${escapeHTML(st.name || id)}</div>
+              <div class="player-id">${escapeHTML(id)} ${st.is_grouped ? '<span class="tag">SYNC GROUP</span>' : ''}</div>
+            </div>
+            <div class="status-badge ${statusClass}">
+              <span class="dot ${statusClass === 'status-playing' ? 'green' : (statusClass === 'status-lingering' || statusClass === 'status-dialing' ? 'yellow' : '')}"></span>
+              ${escapeHTML(statusText)}
+            </div>
+          </div>
+
+          ${(trackTitle || trackArtist) ? `
+          <div class="track-meta">
+            <div class="track-icon">🎵</div>
+            <div class="track-info-text">
+              <div class="track-title">${escapeHTML(trackTitle || 'Unknown Track')}</div>
+              <div class="track-artist">${escapeHTML(trackArtist)}${trackAlbum ? ' — ' + escapeHTML(trackAlbum) : ''}</div>
+            </div>
+          </div>
+          ` : ''}
+
+          <div class="flow-topology">
+            <!-- Step 1: Upstream Ingress -->
+            <div class="pipeline-step">
+              <div class="step-header">
+                <span>1. Upstream (Sendspin / Music Assistant)</span>
+                <span>${prod.connected ? '<span class="dot green"></span> Connected' : '<span class="dot yellow"></span> Waiting'}</span>
+              </div>
+              <div class="step-content">
+                <div class="step-endpoint">${escapeHTML(prod.url || 'Sendspin Ingress')}</div>
+                <div class="step-tags">
+                  <span class="tag codec">${escapeHTML(prod.codec ? prod.codec.toUpperCase() : 'PCM')}</span>
+                  <span class="tag">${prod.sample_rate || 48000}Hz</span>
+                  <span class="tag">${prod.channels || 2}ch</span>
+                  <span class="tag">${prod.bit_depth || 16}bit</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 2: Downstream Egress -->
+            <div class="pipeline-step">
+              <div class="step-header">
+                <span>2. Downstream (SIP / RTP Egress)</span>
+                <span>${cons.state ? escapeHTML(cons.state.toUpperCase()) : 'IDLE'}</span>
+              </div>
+              <div class="step-content">
+                <div class="step-endpoint">${escapeHTML(cons.url || 'SIP Target')}</div>
+                <div class="step-tags">
+                  <span class="tag codec">${escapeHTML(cons.active_codec ? cons.active_codec.toUpperCase() : (cons.config_codec || 'G722').toUpperCase())}</span>
+                  <span class="tag mode">${escapeHTML(cons.buffer_mode || 'announcement')}</span>
+                  <span class="tag">Priority ${cons.priority || 0}</span>
+                </div>
+              </div>
+              ${cons.remote_rtp ? `
+              <div style="font-size: 0.76rem; color: var(--muted); font-family: var(--font-mono); margin-top: 4px;">
+                RTP Socket: ${escapeHTML(cons.local_rtp || '0.0.0.0')} ➔ ${escapeHTML(cons.remote_rtp)}
+              </div>
+              ` : ''}
+            </div>
+          </div>
+
+          <div class="stats-strip">
+            <div class="stat-box">
+              <div class="stat-label">Packets Sent</div>
+              <div class="stat-val">${cons.packets_sent || 0}</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Bytes Sent</div>
+              <div class="stat-val">${formatBytes(cons.bytes_sent || 0)}</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">In Chunks</div>
+              <div class="stat-val">${prod.chunks_received || 0}</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Volume</div>
+              <div class="stat-val">${st.muted ? 'MUTED' : (st.volume || 100) + '%'}</div>
+            </div>
+          </div>
+        </div>
+        `;
+      }
+
+      container.innerHTML = html;
+    }
+
+    function escapeHTML(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function updatePolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      const interval = parseInt(document.getElementById('refreshInterval').value, 10);
+      if (interval > 0) {
+        pollTimer = setInterval(() => {
+          fetchStreams();
+          fetchInfo();
+        }, interval);
+      }
+    }
+
+    document.getElementById('refreshInterval').addEventListener('change', updatePolling);
+    document.getElementById('manualRefreshBtn').addEventListener('click', () => {
+      fetchStreams();
+      fetchInfo();
+    });
+
+    // Initial load
+    fetchInfo();
+    fetchStreams();
+    updatePolling();
+  </script>
+</body>
+</html>

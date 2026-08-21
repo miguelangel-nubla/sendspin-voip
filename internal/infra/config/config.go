@@ -16,10 +16,16 @@ import (
 // AppConfig represents the root application configuration.
 type AppConfig struct {
 	LogLevel string         `yaml:"log_level" json:"log_level"`
+	HTTP     HTTPConfig     `yaml:"http" json:"http"`
 	SIP      SIPConfig      `yaml:"sip" json:"sip"`
 	Sendspin SendspinConfig `yaml:"sendspin" json:"sendspin"`
 	Bridge   BridgeConfig   `yaml:"bridge" json:"bridge"`
 	Players  []PlayerConfig `yaml:"players" json:"players"`
+}
+
+// HTTPConfig defines the HTTP server options for web UI and streams debug info.
+type HTTPConfig struct {
+	Listen string `yaml:"listen" json:"listen"` // e.g. ":8080"
 }
 
 // SIPConfig defines SIP connectivity options.
@@ -122,6 +128,9 @@ func Load(explicitPath string) (*AppConfig, error) {
 func DefaultConfig() *AppConfig {
 	return &AppConfig{
 		LogLevel: "info",
+		HTTP: HTTPConfig{
+			Listen: ":8080",
+		},
 		SIP: SIPConfig{
 			Mode:             "pbx",
 			Transport:        "udp",
@@ -148,6 +157,14 @@ func DefaultConfig() *AppConfig {
 func applyEnvOverrides(cfg *AppConfig) {
 	if v := os.Getenv("LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
+	}
+	if v := os.Getenv("HTTP_LISTEN"); v != "" {
+		cfg.HTTP.Listen = v
+	} else if v := os.Getenv("PORT"); v != "" {
+		if !strings.HasPrefix(v, ":") {
+			v = ":" + v
+		}
+		cfg.HTTP.Listen = v
 	}
 	if v := os.Getenv("SIP_SERVER"); v != "" {
 		cfg.SIP.Server = v

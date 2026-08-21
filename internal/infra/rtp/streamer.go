@@ -123,10 +123,31 @@ type Session struct {
 
 	// Sample accumulator for fixed 20ms frame slicing
 	pcmBuffer []int32
+
+	packetsSent uint64
+	bytesSent   uint64
 }
 
 func (s *Session) LocalPort() int {
 	return s.localPort
+}
+
+func (s *Session) Stats() app.RTPStats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	remoteStr := ""
+	if s.remoteAddr != nil {
+		remoteStr = s.remoteAddr.String()
+	}
+
+	return app.RTPStats{
+		LocalPort:   s.localPort,
+		RemoteAddr:  remoteStr,
+		Codec:       s.codec,
+		PacketsSent: s.packetsSent,
+		BytesSent:   s.bytesSent,
+	}
 }
 
 func (s *Session) StartTransmission(remoteAddr *net.UDPAddr) error {
@@ -200,7 +221,13 @@ func (s *Session) sendRTPPacket(payload []byte, timestampDelta uint32) {
 		return
 	}
 
-	_, _ = s.conn.WriteToUDP(raw, remote)
+	n, err := s.conn.WriteToUDP(raw, remote)
+	if err == nil && n > 0 {
+		s.mu.Lock()
+		s.packetsSent++
+		s.bytesSent += uint64(n)
+		s.mu.Unlock()
+	}
 }
 
 // PushAudio accumulates raw PCM samples or forwards native Opus frames to the pacer queue.

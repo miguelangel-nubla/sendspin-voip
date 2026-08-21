@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -549,4 +550,186 @@ func (s *BridgeService) Shutdown() {
 	})
 	_ = s.ingress.StopAll()
 	_ = s.sipCaller.Stop()
+}
+
+// GetStreamsDebugInfo returns debug information for all registered virtual player streams.
+func (s *BridgeService) GetStreamsDebugInfo() map[string]StreamDebugInfo {
+	s.playersMu.RLock()
+	players := make([]*domain.Player, 0, len(s.players))
+	for _, p := range s.players {
+		players = append(players, p)
+	}
+	s.playersMu.RUnlock()
+
+	result := make(map[string]StreamDebugInfo, len(players))
+	for _, p := range players {
+		result[p.Config.ID] = s.buildStreamDebugInfo(p)
+	}
+	return result
+}
+
+// GetStreamDebugInfo returns debug information for a specific player stream.
+func (s *BridgeService) GetStreamDebugInfo(playerID string) (StreamDebugInfo, bool) {
+	s.playersMu.RLock()
+	p, ok := s.players[playerID]
+	s.playersMu.RUnlock()
+
+	if !ok {
+		return StreamDebugInfo{}, false
+	}
+	return s.buildStreamDebugInfo(p), true
+}
+
+func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
+	s.playersMu.RLock()
+	id := p.Config.ID
+	name := p.Config.Name
+	isPlaying := p.IsPlaying
+	isGrouped := p.IsGrouped
+	vol := p.Volume
+	muted := p.IsMuted
+	cfg := p.Config
+	s.playersMu.RUnlock()
+
+	info := StreamDebugInfo{
+		ID:        id,
+		Name:      name,
+		State:     "idle",
+		IsPlaying: isPlaying,
+		IsGrouped: isGrouped,
+		Volume:    vol,
+		Muted:     muted,
+		Producers: make([]ProducerDebugInfo, 0, 1),
+		Consumers: make([]ConsumerDebugInfo, 0, 1),
+	}
+
+	if isPlaying {
+		info.State = "playing"
+	}
+
+	// 1. Gather Producer Info (Sendspin Ingress)
+	ingStats, hasIngress := s.ingress.GetPlayerStats(id)
+	var trackStr string
+	if ingStats.Metadata.Artist != "" && ingStats.Metadata.Title != "" {
+		trackStr = fmt.Sprintf("%s - %s", ingStats.Metadata.Artist, ingStats.Metadata.Title)
+	} else if ingStats.Metadata.Title != "" {
+		trackStr = ingStats.Metadata.Title
+	}
+
+	prodState := "idle"
+	if isPlaying {
+		prodState = "playing"
+	} else if hasIngress && ingStats.Connected {
+		prodState = "connected"
+	}
+
+	var prodFormat string
+	if ingStats.Codec != "" {
+		prodFormat = fmt.Sprintf("%s %dHz %dch %dbit", strings.ToUpper(ingStats.Codec), ingStats.SampleRate, ingStats.Channels, ingStats.BitDepth)
+	} else {
+		prodFormat = "PCM 48000Hz 2ch 16bit"
+	}
+
+	ingressURL := ingStats.ServerAddr
+	if ingressURL != "" && !strings.HasPrefix(ingressURL, "ws://") && !strings.HasPrefix(ingressURL, "http://") {
+		ingressURL = "ws://" + ingressURL + "/sendspin"
+	}
+
+	info.Producers = append(info.Producers, ProducerDebugInfo{
+		Type:           "Sendspin Ingress",
+		URL:            ingressURL,
+		Connected:      ingStats.Connected,
+		Format:         prodFormat,
+		Codec:          ingStats.Codec,
+		SampleRate:     ingStats.SampleRate,
+		Channels:       ingStats.Channels,
+		BitDepth:       ingStats.BitDepth,
+		State:          prodState,
+		Track:          trackStr,
+		Artist:         ingStats.Metadata.Artist,
+		Title:          ingStats.Metadata.Title,
+		Album:          ingStats.Metadata.Album,
+		ChunksReceived: ingStats.ChunksReceived,
+		BytesReceived:  ingStats.BytesReceived,
+	})
+
+	// 2. Gather Consumer Info (SIP/RTP Egress)
+	val, hasCall := s.activeCalls.Load(id)
+	if hasCall {
+		call := val.(*activeCallState)
+		call.mu.Lock()
+		sessionState := string(call.session.GetState())
+		effectiveMode := string(call.session.EffectiveMod)
+		priority := call.session.Priority
+		bufferedCount := len(call.buffer)
+		lingerActive := (call.lingerTimer != nil)
+		startTime := call.session.StartTime
+		answerTime := call.session.AnswerTime
+		call.mu.Unlock()
+
+		var activeCodec domain.Codec = cfg.Codec
+		var rtpStats RTPStats
+		if call.rtpSession != nil {
+			rtpStats = call.rtpSession.Stats()
+			if rtpStats.Codec != "" {
+				activeCodec = rtpStats.Codec
+			}
+		}
+
+		if lingerActive {
+			info.State = "lingering"
+			sessionState = "lingering"
+		} else if sessionState == string(domain.StateActive) {
+			info.State = "active"
+		} else if sessionState == string(domain.StateDialing) {
+			info.State = "dialing"
+		}
+
+		var durationSec float64
+		if !answerTime.IsZero() {
+			durationSec = time.Since(answerTime).Seconds()
+		} else if !startTime.IsZero() {
+			durationSec = time.Since(startTime).Seconds()
+		}
+
+		var localRTPStr string
+		if rtpStats.LocalPort > 0 {
+			localRTPStr = fmt.Sprintf("0.0.0.0:%d", rtpStats.LocalPort)
+		}
+
+		info.Consumers = append(info.Consumers, ConsumerDebugInfo{
+			Type:           "SIP/RTP Egress",
+			URL:            cfg.SIPTarget,
+			State:          sessionState,
+			ConfigCodec:    string(cfg.Codec),
+			ActiveCodec:    string(activeCodec),
+			Format:         fmt.Sprintf("%s (%s mode)", strings.ToUpper(string(activeCodec)), effectiveMode),
+			LocalRTP:       localRTPStr,
+			RemoteRTP:      rtpStats.RemoteAddr,
+			BufferMode:     effectiveMode,
+			Priority:       priority,
+			BufferedChunks: bufferedCount,
+			LingerActive:   lingerActive,
+			PacketsSent:    rtpStats.PacketsSent,
+			BytesSent:      rtpStats.BytesSent,
+			DurationSec:    durationSec,
+		})
+	} else {
+		bMode := cfg.BufferMode
+		if bMode == "" {
+			bMode = s.config.DefaultBufferMode
+		}
+		info.Consumers = append(info.Consumers, ConsumerDebugInfo{
+			Type:        "SIP/RTP Egress",
+			URL:         cfg.SIPTarget,
+			State:       "idle",
+			ConfigCodec: string(cfg.Codec),
+			ActiveCodec: string(cfg.Codec),
+			Format:      fmt.Sprintf("%s (%s mode)", strings.ToUpper(string(cfg.Codec)), bMode),
+			BufferMode:  string(bMode),
+			Priority:    cfg.Priority,
+		})
+	}
+
+	return info
 }

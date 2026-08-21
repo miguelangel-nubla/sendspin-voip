@@ -8,6 +8,93 @@ import (
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
 )
 
+// SIPStatus represents current SIP connection and registration state.
+type SIPStatus struct {
+	Mode         string    `json:"mode"`
+	Server       string    `json:"server"`
+	Username     string    `json:"username"`
+	Domain       string    `json:"domain"`
+	Transport    string    `json:"transport"`
+	LocalIP      string    `json:"local_ip"`
+	LocalSIPPort int       `json:"local_sip_port"`
+	Registered   bool      `json:"registered"`
+	LastRegister time.Time `json:"last_register,omitempty"`
+}
+
+// RTPStats represents runtime metrics for an active RTP session.
+type RTPStats struct {
+	LocalPort   int          `json:"local_port"`
+	RemoteAddr  string       `json:"remote_addr"`
+	Codec       domain.Codec `json:"codec"`
+	PacketsSent uint64       `json:"packets_sent"`
+	BytesSent   uint64       `json:"bytes_sent"`
+}
+
+// IngressPlayerStats represents runtime metrics for a Sendspin ingress connection.
+type IngressPlayerStats struct {
+	ServerAddr     string                `json:"server_addr"`
+	Connected      bool                  `json:"connected"`
+	Codec          string                `json:"codec"`
+	SampleRate     int                   `json:"sample_rate"`
+	Channels       int                   `json:"channels"`
+	BitDepth       int                   `json:"bit_depth"`
+	Metadata       domain.StreamMetadata `json:"metadata"`
+	ChunksReceived uint64                `json:"chunks_received"`
+	BytesReceived  uint64                `json:"bytes_received"`
+}
+
+// ProducerDebugInfo details the upstream audio ingress source.
+type ProducerDebugInfo struct {
+	Type           string `json:"type"` // "Sendspin Ingress"
+	URL            string `json:"url"`
+	Connected      bool   `json:"connected"`
+	Format         string `json:"format"` // e.g. "PCM 16000Hz 1ch 16bit" or "Opus 48000Hz 2ch"
+	Codec          string `json:"codec"`
+	SampleRate     int    `json:"sample_rate"`
+	Channels       int    `json:"channels"`
+	BitDepth       int    `json:"bit_depth"`
+	State          string `json:"state"`
+	Track          string `json:"track,omitempty"`
+	Artist         string `json:"artist,omitempty"`
+	Title          string `json:"title,omitempty"`
+	Album          string `json:"album,omitempty"`
+	ChunksReceived uint64 `json:"chunks_received"`
+	BytesReceived  uint64 `json:"bytes_received"`
+}
+
+// ConsumerDebugInfo details the downstream SIP/RTP egress destination.
+type ConsumerDebugInfo struct {
+	Type           string  `json:"type"` // "SIP/RTP Egress"
+	URL            string  `json:"url"`  // e.g. "sip:8003@asterisk.local.myol.es"
+	CallID         string  `json:"call_id,omitempty"`
+	State          string  `json:"state"`
+	ConfigCodec    string  `json:"config_codec"`
+	ActiveCodec    string  `json:"active_codec"`
+	Format         string  `json:"format"` // e.g. "G.722 16000Hz 1ch"
+	LocalRTP       string  `json:"local_rtp,omitempty"`
+	RemoteRTP      string  `json:"remote_rtp,omitempty"`
+	BufferMode     string  `json:"buffer_mode"`
+	Priority       int     `json:"priority"`
+	BufferedChunks int     `json:"buffered_chunks"`
+	LingerActive   bool    `json:"linger_active"`
+	PacketsSent    uint64  `json:"packets_sent"`
+	BytesSent      uint64  `json:"bytes_sent"`
+	DurationSec    float64 `json:"duration_sec"`
+}
+
+// StreamDebugInfo provides comprehensive debug information for a virtual player stream.
+type StreamDebugInfo struct {
+	ID        string              `json:"id"`
+	Name      string              `json:"name"`
+	State     string              `json:"state"` // "idle", "dialing", "playing", "lingering", "paused"
+	IsPlaying bool                `json:"is_playing"`
+	IsGrouped bool                `json:"is_grouped"`
+	Volume    int                 `json:"volume"`
+	Muted     bool                `json:"muted"`
+	Producers []ProducerDebugInfo `json:"producers"`
+	Consumers []ConsumerDebugInfo `json:"consumers"`
+}
+
 // SIPDialog represents an active SIP call dialog.
 type SIPDialog interface {
 	// RemoteRTPAddr returns the remote IP and RTP port parsed from the SIP 200 OK SDP answer.
@@ -30,6 +117,8 @@ type SIPCallerPort interface {
 	Dial(ctx context.Context, player domain.PlayerConfig, localRTPPort int) (SIPDialog, error)
 	// LocalIP returns the advertised local IP address for SDP.
 	LocalIP() string
+	// RegistrationStatus returns current SIP registration and connectivity info.
+	RegistrationStatus() SIPStatus
 }
 
 // RTPStreamerPort defines the interface for creating and managing RTP audio streaming sessions.
@@ -52,6 +141,8 @@ type RTPSession interface {
 	ClearBuffer()
 	// DrainAndClose waits for drainDelay then closes the RTP socket.
 	DrainAndClose(drainDelay time.Duration) error
+	// Stats returns packet and byte transmission counters.
+	Stats() RTPStats
 }
 
 // AudioTranscoderPort defines the interface for resampling, volume adjustment, and codec encoding.
@@ -67,6 +158,8 @@ type PlayerIngressPort interface {
 	// SendPauseToUpstream sends a pause command to Music Assistant for the given player.
 	// Called when the remote phone hangs up to stop the upstream stream.
 	SendPauseToUpstream(playerID string)
+	// GetPlayerStats retrieves current ingress stats and metadata for a player.
+	GetPlayerStats(playerID string) (IngressPlayerStats, bool)
 	// StopAll disconnects all virtual players.
 	StopAll() error
 }

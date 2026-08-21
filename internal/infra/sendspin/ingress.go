@@ -29,6 +29,16 @@ type playerWorker struct {
 	client  *protocol.Client
 	cancel  context.CancelFunc
 	ctx     context.Context
+
+	statsMu        sync.RWMutex
+	connected      bool
+	currentCodec   string
+	currentRate    int
+	currentChannels int
+	currentBitDepth int
+	currentMeta    domain.StreamMetadata
+	chunksReceived uint64
+	bytesReceived  uint64
 }
 
 // Ingress implements app.PlayerIngressPort using Sendspin wire protocol.
@@ -304,6 +314,14 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 			continue
 		}
 
+		w.statsMu.Lock()
+		w.connected = true
+		w.currentCodec = "pcm"
+		w.currentRate = 48000
+		w.currentChannels = 2
+		w.currentBitDepth = 16
+		w.statsMu.Unlock()
+
 		w.client = client
 		ing.logger.Info("Player client successfully connected to Music Assistant", "player_id", w.cfg.ID)
 
@@ -322,9 +340,15 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		for {
 			select {
 			case <-w.ctx.Done():
+				w.statsMu.Lock()
+				w.connected = false
+				w.statsMu.Unlock()
 				client.Close()
 				return
 			case <-done:
+				w.statsMu.Lock()
+				w.connected = false
+				w.statsMu.Unlock()
 				ing.logger.Warn("Sendspin player disconnected, will reconnect", "player_id", w.cfg.ID)
 				break eventLoop
 
@@ -338,6 +362,13 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					currentChannels = startMsg.Player.Channels
 					currentBitDepth = startMsg.Player.BitDepth
 				}
+				w.statsMu.Lock()
+				w.currentCodec = currentCodec
+				w.currentRate = currentRate
+				w.currentChannels = currentChannels
+				w.currentBitDepth = currentBitDepth
+				w.statsMu.Unlock()
+
 				ing.logger.Info("Sendspin stream start received",
 					"player_id", w.cfg.ID,
 					"codec", currentCodec,
@@ -366,6 +397,10 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 						Album:       ptrString(stateMsg.Metadata.Album),
 						StreamTitle: ptrString(stateMsg.Metadata.Title),
 					}
+					w.statsMu.Lock()
+					w.currentMeta = currentMeta
+					w.statsMu.Unlock()
+
 					if stateMsg.Metadata.Progress != nil {
 						if stateMsg.Metadata.Progress.PlaybackSpeed == 0 {
 							w.handler.OnPlaybackState(w.cfg.ID, "paused")
@@ -390,6 +425,11 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				}
 
 			case chunk := <-client.AudioChunks:
+				w.statsMu.Lock()
+				w.chunksReceived++
+				w.bytesReceived += uint64(len(chunk.Data))
+				w.statsMu.Unlock()
+
 				if currentCodec == "opus" {
 					if w.cfg.Codec == domain.CodecOpus {
 						// Passthrough Opus frame directly
@@ -436,6 +476,9 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 			}
 		}
 
+		w.statsMu.Lock()
+		w.connected = false
+		w.statsMu.Unlock()
 		client.Close()
 		time.Sleep(2 * time.Second)
 	}
@@ -475,6 +518,33 @@ func (ing *Ingress) getServerAddr() string {
 	ing.mu.Lock()
 	defer ing.mu.Unlock()
 	return ing.serverAddr
+}
+
+// GetPlayerStats retrieves current ingress stats and metadata for a player.
+func (ing *Ingress) GetPlayerStats(playerID string) (app.IngressPlayerStats, bool) {
+	ing.mu.Lock()
+	w, ok := ing.workers[playerID]
+	serverAddr := ing.serverAddr
+	ing.mu.Unlock()
+
+	if !ok {
+		return app.IngressPlayerStats{}, false
+	}
+
+	w.statsMu.RLock()
+	defer w.statsMu.RUnlock()
+
+	return app.IngressPlayerStats{
+		ServerAddr:     serverAddr,
+		Connected:      w.connected,
+		Codec:          w.currentCodec,
+		SampleRate:     w.currentRate,
+		Channels:       w.currentChannels,
+		BitDepth:       w.currentBitDepth,
+		Metadata:       w.currentMeta,
+		ChunksReceived: w.chunksReceived,
+		BytesReceived:  w.bytesReceived,
+	}, true
 }
 
 // StopAll stops all virtual players and cancels background tasks.

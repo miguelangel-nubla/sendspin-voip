@@ -40,6 +40,8 @@ type Caller struct {
 	dialogCache   *sipgo.DialogClientCache
 	localIP       string
 	activeDialogs map[string]*DialogWrapper
+	registered    bool
+	lastRegister  time.Time
 	mu            sync.Mutex
 }
 
@@ -154,9 +156,13 @@ func (c *Caller) Start(ctx context.Context) error {
 
 	// In PBX mode with server & username configured, perform SIP registration and maintain lease
 	if strings.EqualFold(c.config.Mode, "pbx") && c.config.Server != "" && c.config.Username != "" {
-		if err := c.register(ctx); err != nil {
-			c.logger.Warn("SIP PBX initial registration note", "err", err)
-		}
+		go func() {
+			regCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			if err := c.register(regCtx); err != nil {
+				c.logger.Warn("SIP PBX initial registration note", "err", err)
+			}
+		}()
 		go c.registrationLoop(ctx)
 	}
 
@@ -229,11 +235,37 @@ func (c *Caller) register(ctx context.Context) error {
 	}
 
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
+		c.mu.Lock()
+		c.registered = true
+		c.lastRegister = time.Now()
+		c.mu.Unlock()
 		c.logger.Info("Successfully registered with SIP PBX", "server", c.config.Server, "user", c.config.Username)
 		return nil
 	}
 
+	c.mu.Lock()
+	c.registered = false
+	c.mu.Unlock()
+
 	return fmt.Errorf("SIP PBX registration rejected with status %d %s", res.StatusCode, res.Reason)
+}
+
+// RegistrationStatus returns current SIP registration and connectivity info.
+func (c *Caller) RegistrationStatus() app.SIPStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return app.SIPStatus{
+		Mode:         c.config.Mode,
+		Server:       c.config.Server,
+		Username:     c.config.Username,
+		Domain:       c.config.Domain,
+		Transport:    c.config.Transport,
+		LocalIP:      c.localIP,
+		LocalSIPPort: c.config.LocalSIPPort,
+		Registered:   c.registered,
+		LastRegister: c.lastRegister,
+	}
 }
 
 // Stop stops the SIP client, server, and UA.

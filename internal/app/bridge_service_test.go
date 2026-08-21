@@ -55,6 +55,13 @@ type mockSIPCaller struct {
 func (m *mockSIPCaller) Start(ctx context.Context) error { return nil }
 func (m *mockSIPCaller) Stop() error                    { return nil }
 func (m *mockSIPCaller) LocalIP() string                 { return "127.0.0.1" }
+func (m *mockSIPCaller) RegistrationStatus() SIPStatus {
+	return SIPStatus{
+		Mode:       "pbx",
+		Server:     "127.0.0.1:5060",
+		Registered: true,
+	}
+}
 func (m *mockSIPCaller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPPort int) (SIPDialog, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -80,6 +87,20 @@ type mockRTPSession struct {
 }
 
 func (m *mockRTPSession) LocalPort() int { return m.localPort }
+func (m *mockRTPSession) Stats() RTPStats {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rStr := ""
+	if m.startedAddr != nil {
+		rStr = m.startedAddr.String()
+	}
+	return RTPStats{
+		LocalPort:   m.localPort,
+		RemoteAddr:  rStr,
+		PacketsSent: uint64(m.chunksPushed),
+		BytesSent:   uint64(m.chunksPushed * 160),
+	}
+}
 func (m *mockRTPSession) StartTransmission(remoteAddr *net.UDPAddr) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -141,6 +162,17 @@ func (m *mockIngress) StopAll() error {
 }
 
 func (m *mockIngress) SendPauseToUpstream(playerID string) {}
+
+func (m *mockIngress) GetPlayerStats(playerID string) (IngressPlayerStats, bool) {
+	return IngressPlayerStats{
+		ServerAddr: "127.0.0.1:8927",
+		Connected:  true,
+		Codec:      "pcm",
+		SampleRate: 16000,
+		Channels:   1,
+		BitDepth:   16,
+	}, true
+}
 
 func TestBridgeService_LifecycleAndPlayback(t *testing.T) {
 	sipCaller := &mockSIPCaller{}
@@ -527,6 +559,71 @@ func TestBridgeService_TrackChange_StateStopped_ReusesCall(t *testing.T) {
 		t.Errorf("expected only 1 SIP dial across track change, got %d", sipCaller.dialCount)
 	}
 	sipCaller.mu.Unlock()
+
+	bridge.Shutdown()
+}
+
+func TestBridgeService_GetStreamsDebugInfo(t *testing.T) {
+	sipCaller := &mockSIPCaller{}
+	rtpStreamer := &mockRTPStreamer{}
+	ingress := &mockIngress{}
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+
+	bridge := NewBridgeService(
+		nil,
+		BridgeConfig{
+			DefaultBufferMode: domain.BufferModeAnnouncement,
+			PickupBufferMs:    500,
+			DrainDelayMs:      50,
+			IdleHangupDelayMs: 2000,
+		},
+		arbiter,
+		sipCaller,
+		rtpStreamer,
+		ingress,
+	)
+
+	playerConfigs := []domain.PlayerConfig{
+		{
+			ID:            "player-test",
+			Name:          "Test Desk Phone",
+			SIPTarget:     "sip:8003@asterisk.local",
+			Codec:         domain.CodecG722,
+			BufferMode:    domain.BufferModeLive,
+			Priority:      10,
+			DefaultVolume: 100,
+		},
+	}
+	_ = bridge.RegisterPlayers(playerConfigs)
+
+	// Check idle state debug info
+	streams := bridge.GetStreamsDebugInfo()
+	if len(streams) != 1 {
+		t.Fatalf("expected 1 stream, got %d", len(streams))
+	}
+	st, ok := streams["player-test"]
+	if !ok {
+		t.Fatalf("expected stream for player-test")
+	}
+	if st.ID != "player-test" || st.Name != "Test Desk Phone" {
+		t.Errorf("unexpected stream details: %+v", st)
+	}
+	if len(st.Producers) == 0 || len(st.Consumers) == 0 {
+		t.Errorf("expected producers and consumers in debug info")
+	}
+
+	// Start playback
+	bridge.OnStreamStart("player-test", domain.StreamMetadata{Title: "Song 1", Artist: "Artist 1"})
+	bridge.OnPlaybackState("player-test", "playing")
+	time.Sleep(30 * time.Millisecond)
+
+	stActive, ok := bridge.GetStreamDebugInfo("player-test")
+	if !ok {
+		t.Fatalf("expected player-test in active streams")
+	}
+	if stActive.State != "active" && stActive.State != "playing" && stActive.State != "dialing" {
+		t.Errorf("expected active/playing state, got %s", stActive.State)
+	}
 
 	bridge.Shutdown()
 }

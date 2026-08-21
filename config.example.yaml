@@ -1,6 +1,10 @@
 # sendspin-voip Configuration Example
 log_level: info # debug, info, warn, error
 
+# Web UI & Debug HTTP API (go2rtc style)
+http:
+  listen: ":8080" # Web UI dashboard at http://localhost:8080/ and JSON at /api/streams
+
 # SIP PBX / Server Connection
 sip:
   mode: pbx # "pbx" (registered with credentials) or "direct" (peer-to-peer LAN dialing)
