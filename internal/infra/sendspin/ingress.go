@@ -425,6 +425,12 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				w.currentBitDepth = currentBitDepth
 				w.statsMu.Unlock()
 
+				if currentChannels > 0 && (currentChannels == 1 || currentChannels == 2) {
+					if dec, err := opus.NewDecoderWithOutput(48000, currentChannels); err == nil {
+						opusDecoder = dec
+					}
+				}
+
 				ing.logger.Info("Sendspin stream start received",
 					"player_id", w.cfg.ID,
 					"codec", currentCodec,

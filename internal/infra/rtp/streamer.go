@@ -96,8 +96,9 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 		ssrc:       ssrc,
 		seq:        1,
 		timestamp:  1000,
-		audioQueue: make(chan []byte, 1000), // 20ms packet buffer (up to 20s, prevents dropping bursts)
-		stopChan:   make(chan struct{}),
+		audioQueue:                make(chan []byte, 1000), // 20ms packet buffer (up to 20s, prevents dropping bursts)
+		stopChan:                  make(chan struct{}),
+		isFirstPacketAfterSilence: true,
 	}
 
 	return sess, nil
@@ -123,6 +124,10 @@ type Session struct {
 
 	// Sample accumulator for fixed 20ms frame slicing
 	pcmBuffer []int32
+
+	// Silence and jitter tracking
+	lastPacketSentTime        time.Time
+	isFirstPacketAfterSilence bool
 
 	packetsSent uint64
 	bytesSent   uint64
@@ -195,12 +200,37 @@ func (s *Session) pacingLoop() {
 }
 
 func (s *Session) sendRTPPacket(payload []byte, timestampDelta uint32, codec domain.Codec) {
+	now := time.Now()
+
 	s.mu.Lock()
 	remote := s.remoteAddr
 	seq := s.seq
+	isFirst := s.isFirstPacketAfterSilence
+
+	// If there was an idle/silence gap > 60ms between packets, align timestamp to elapsed wall-clock time
+	if !isFirst && !s.lastPacketSentTime.IsZero() {
+		elapsed := now.Sub(s.lastPacketSentTime)
+		if elapsed > 60*time.Millisecond {
+			isFirst = true
+			clockRate := uint32(codec.RTPClockRate())
+			elapsedTicks := uint32(elapsed.Seconds() * float64(clockRate))
+			s.timestamp += elapsedTicks
+		} else {
+			s.timestamp += timestampDelta
+		}
+	} else if isFirst && !s.lastPacketSentTime.IsZero() {
+		elapsed := now.Sub(s.lastPacketSentTime)
+		if elapsed > 0 {
+			clockRate := uint32(codec.RTPClockRate())
+			elapsedTicks := uint32(elapsed.Seconds() * float64(clockRate))
+			s.timestamp += elapsedTicks
+		}
+	}
+
 	ts := s.timestamp
+	s.lastPacketSentTime = now
+	s.isFirstPacketAfterSilence = false
 	s.seq++
-	s.timestamp += timestampDelta
 	s.mu.Unlock()
 
 	if remote == nil || len(payload) == 0 {
@@ -214,7 +244,7 @@ func (s *Session) sendRTPPacket(payload []byte, timestampDelta uint32, codec dom
 			SequenceNumber: seq,
 			Timestamp:      ts,
 			SSRC:           s.ssrc,
-			Marker:         seq == 1,
+			Marker:         isFirst || seq == 1,
 		},
 		Payload: payload,
 	}
@@ -285,6 +315,7 @@ func (s *Session) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 func (s *Session) ClearBuffer() {
 	s.mu.Lock()
 	s.pcmBuffer = nil
+	s.isFirstPacketAfterSilence = true
 	s.mu.Unlock()
 
 	// Drain all pending packets from audioQueue
