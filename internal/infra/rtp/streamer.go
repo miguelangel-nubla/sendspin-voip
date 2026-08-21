@@ -96,7 +96,7 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 		ssrc:       ssrc,
 		seq:        1,
 		timestamp:  1000,
-		audioQueue: make(chan []byte, 50), // 20ms packet buffer (up to 1s)
+		audioQueue: make(chan []byte, 1000), // 20ms packet buffer (up to 20s, prevents dropping bursts)
 		stopChan:   make(chan struct{}),
 	}
 

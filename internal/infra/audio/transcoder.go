@@ -22,6 +22,13 @@ func NewTranscoder() *Transcoder {
 	return &Transcoder{}
 }
 
+// Reset clears any cached encoder state.
+func (t *Transcoder) Reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.g722Enc = nil
+}
+
 // Transcode converts raw PCM samples to target codec payload with downmixing, resampling, and volume scaling.
 func (t *Transcoder) Transcode(
 	samples []int32,

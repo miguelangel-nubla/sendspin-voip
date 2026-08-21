@@ -269,16 +269,15 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 		"codec", activeCodec,
 	)
 
-	// Flush buffered audio if in Announcement mode
+	// Flush buffered audio if in Announcement mode under lock before setting answered=true
 	call.mu.Lock()
-	call.answered = true
 	var preBuffer []domain.AudioChunk
 	if session.EffectiveMod == domain.BufferModeAnnouncement {
-		preBuffer = make([]domain.AudioChunk, len(call.buffer))
-		copy(preBuffer, call.buffer)
+		preBuffer = call.buffer
+		call.buffer = nil
+	} else {
+		call.buffer = nil
 	}
-	call.buffer = nil
-	call.mu.Unlock()
 
 	s.playersMu.RLock()
 	volume := 100
@@ -295,6 +294,8 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 			s.logger.Debug("Error pushing buffered audio chunk", "err", err)
 		}
 	}
+	call.answered = true
+	call.mu.Unlock()
 
 	// Listen for remote hangup (phone physically hung up)
 	select {
