@@ -487,36 +487,24 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				w.statsMu.Unlock()
 
 				if currentCodec == "opus" {
-					if w.cfg.Codec == domain.CodecOpus {
-						// Passthrough Opus frame directly
-						audioChunk := domain.AudioChunk{
-							Timestamp:  chunk.Timestamp,
-							PlayAt:     time.Now(),
-							OpusData:   chunk.Data,
-							SampleRate: 48000,
-							Channels:   currentChannels,
-							BitDepth:   16,
-						}
-						w.handler.OnAudioChunk(w.cfg.ID, audioChunk)
-					} else {
-						// Decode Opus to PCM using pure-Go pion/opus for transcoding to G.722/G.711
-						n, err := opusDecoder.DecodeToInt16(chunk.Data, pcm16Buf)
-						if err == nil && n > 0 {
-							samples := make([]int32, n*currentChannels)
-							for i := 0; i < len(samples); i++ {
-								samples[i] = int32(pcm16Buf[i])
-							}
-							audioChunk := domain.AudioChunk{
-								Timestamp:  chunk.Timestamp,
-								PlayAt:     time.Now(),
-								Samples:    samples,
-								SampleRate: 48000,
-								Channels:   currentChannels,
-								BitDepth:   16,
-							}
-							w.handler.OnAudioChunk(w.cfg.ID, audioChunk)
+					var samples []int32
+					n, err := opusDecoder.DecodeToInt16(chunk.Data, pcm16Buf)
+					if err == nil && n > 0 {
+						samples = make([]int32, n*currentChannels)
+						for i := 0; i < len(samples); i++ {
+							samples[i] = int32(pcm16Buf[i])
 						}
 					}
+					audioChunk := domain.AudioChunk{
+						Timestamp:  chunk.Timestamp,
+						PlayAt:     time.Now(),
+						OpusData:   chunk.Data,
+						Samples:    samples,
+						SampleRate: 48000,
+						Channels:   currentChannels,
+						BitDepth:   16,
+					}
+					w.handler.OnAudioChunk(w.cfg.ID, audioChunk)
 				} else {
 					samples := decodePCM(chunk.Data, currentBitDepth)
 					audioChunk := domain.AudioChunk{

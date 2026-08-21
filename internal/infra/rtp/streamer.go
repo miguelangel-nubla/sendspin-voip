@@ -174,16 +174,19 @@ func (s *Session) pacingLoop() {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 
-	samplesPerPacket := (s.codec.RTPClockRate() * 20) / 1000 // e.g. 160 samples for 8kHz / G.722
-
 	for {
 		select {
 		case <-s.stopChan:
 			return
 		case <-ticker.C:
+			s.mu.Lock()
+			codec := s.codec
+			s.mu.Unlock()
+			samplesPerPacket := (codec.RTPClockRate() * 20) / 1000
+
 			select {
 			case payload := <-s.audioQueue:
-				s.sendRTPPacket(payload, samplesPerPacket)
+				s.sendRTPPacket(payload, samplesPerPacket, codec)
 			default:
 				// Silence or idle interval
 			}
@@ -191,7 +194,7 @@ func (s *Session) pacingLoop() {
 	}
 }
 
-func (s *Session) sendRTPPacket(payload []byte, timestampDelta uint32) {
+func (s *Session) sendRTPPacket(payload []byte, timestampDelta uint32, codec domain.Codec) {
 	s.mu.Lock()
 	remote := s.remoteAddr
 	seq := s.seq
@@ -207,7 +210,7 @@ func (s *Session) sendRTPPacket(payload []byte, timestampDelta uint32) {
 	pkt := &rtp.Packet{
 		Header: rtp.Header{
 			Version:        2,
-			PayloadType:    s.codec.PayloadType(),
+			PayloadType:    codec.PayloadType(),
 			SequenceNumber: seq,
 			Timestamp:      ts,
 			SSRC:           s.ssrc,
