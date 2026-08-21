@@ -228,6 +228,7 @@ func (ing *Ingress) UnregisterPlayer(playerID string) error {
 	if worker, ok := ing.workers[playerID]; ok {
 		worker.cancel()
 		if worker.client != nil {
+			_ = worker.client.SendGoodbye("shutdown")
 			worker.client.Close()
 		}
 		delete(ing.workers, playerID)
@@ -443,7 +444,6 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		var currentRate = primaryRate
 		var currentChannels = primaryChannels
 		var currentBitDepth = primaryBitDepth
-		var isStreaming bool
 
 		opusDecoder, _ := opus.NewDecoderWithOutput(48000, 2)
 		pcm16Buf := make([]int16, 5760*2) // up to 120ms frame at 48kHz stereo
@@ -457,6 +457,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				w.statsMu.Lock()
 				w.connected = false
 				w.statsMu.Unlock()
+				_ = client.SendGoodbye("shutdown")
 				client.Close()
 				return
 			case <-done:
@@ -467,7 +468,6 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				break eventLoop
 
 			case startMsg := <-client.StreamStart:
-				isStreaming = true
 				if startMsg.Player != nil {
 					currentCodec = strings.ToLower(startMsg.Player.Codec)
 					if currentCodec == "" {
@@ -500,15 +500,10 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					"bit_depth", currentBitDepth,
 					"title", currentMeta.Title,
 				)
-				w.statsMu.RLock()
-				vol := w.currentVolume
-				muted := w.isMuted
-				w.statsMu.RUnlock()
-				_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+				_ = client.SendState(protocol.PlayerState{State: "synchronized"})
 				w.handler.OnStreamStart(w.cfg.ID, currentMeta)
 
 			case <-client.StreamEnd:
-				isStreaming = false
 				ing.logger.Info("Sendspin stream end received", "player_id", w.cfg.ID)
 				w.handler.OnStreamEnd(w.cfg.ID)
 
@@ -549,22 +544,12 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				if cmd.Command == "volume" {
 					w.statsMu.Lock()
 					w.currentVolume = cmd.Volume
-					vol := w.currentVolume
-					muted := w.isMuted
 					w.statsMu.Unlock()
-					if isStreaming {
-						_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
-					}
 					w.handler.OnVolumeChange(w.cfg.ID, cmd.Volume)
 				} else if cmd.Command == "mute" {
 					w.statsMu.Lock()
 					w.isMuted = cmd.Mute
-					vol := w.currentVolume
-					muted := w.isMuted
 					w.statsMu.Unlock()
-					if isStreaming {
-						_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
-					}
 					w.handler.OnMuteChange(w.cfg.ID, cmd.Mute)
 				}
 
@@ -718,6 +703,7 @@ func (ing *Ingress) StopAll() error {
 	for _, w := range ing.workers {
 		w.cancel()
 		if w.client != nil {
+			_ = w.client.SendGoodbye("shutdown")
 			w.client.Close()
 		}
 	}
