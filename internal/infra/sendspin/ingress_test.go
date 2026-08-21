@@ -43,3 +43,30 @@ func TestDecodePCM_24Bit(t *testing.T) {
 		t.Errorf("expected sample 1 to be 32639, got %d", samples[1])
 	}
 }
+
+func TestNormalizeChannels(t *testing.T) {
+	tests := []struct {
+		name     string
+		channels int
+		fallback int
+		want     int
+	}{
+		{"mono passes through", 1, 2, 1},
+		{"stereo passes through", 2, 1, 2},
+		{"zero falls back", 0, 1, 1},
+		{"negative falls back", -3, 2, 2},
+		// A server announcing a layout the Opus decoder was not built for used to
+		// be trusted verbatim, which sized the sample slice past the decode buffer
+		// and panicked with an index-out-of-range on the first chunk.
+		{"unsupported layout falls back", 6, 2, 2},
+		{"unsupported layout with bad fallback defaults to stereo", 6, 0, 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeChannels(tt.channels, tt.fallback); got != tt.want {
+				t.Errorf("normalizeChannels(%d, %d) = %d, want %d", tt.channels, tt.fallback, got, tt.want)
+			}
+		})
+	}
+}

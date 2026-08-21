@@ -18,6 +18,26 @@ import (
 	"github.com/pion/opus"
 )
 
+const (
+	// maxOpusFrameSamples is the largest Opus frame per channel: 120 ms at 48 kHz.
+	maxOpusFrameSamples = 5760
+	// maxOpusChannels is the widest layout the Opus decoder is built for.
+	maxOpusChannels = 2
+)
+
+// normalizeChannels clamps an announced channel count to a layout the Opus
+// decoder and the RTP egress pipeline can actually handle, falling back to
+// fallback (and finally stereo) when the server announces something invalid.
+func normalizeChannels(channels, fallback int) int {
+	if channels == 1 || channels == 2 {
+		return channels
+	}
+	if fallback == 1 || fallback == 2 {
+		return fallback
+	}
+	return 2
+}
+
 // IngressConfig defines Sendspin ingress adapter settings.
 type IngressConfig struct {
 	Server   string // "auto" for mDNS, or "ws://host:port" or "host:port"
@@ -28,11 +48,14 @@ type playerWorker struct {
 	cfg     domain.PlayerConfig
 	codecs  []domain.Codec
 	handler app.PlayerEventHandler
-	client  *protocol.Client
 	cancel  context.CancelFunc
 	ctx     context.Context
 
-	statsMu         sync.RWMutex
+	statsMu sync.RWMutex
+	// client is written by the worker goroutine on every (re)connect and read by
+	// callers on the Ingress API surface, so it lives under statsMu like the rest
+	// of the worker's mutable state. Use setClient/getClient.
+	client          *protocol.Client
 	connected       bool
 	currentCodec    string
 	currentRate     int
@@ -48,6 +71,20 @@ type playerWorker struct {
 	// clockOffsetUs maps Sendspin server timestamps to local wall clock (PlayAt).
 	clockOffsetUs int64
 	clockSynced   bool
+}
+
+// setClient publishes the protocol client for the current connection attempt.
+func (w *playerWorker) setClient(c *protocol.Client) {
+	w.statsMu.Lock()
+	w.client = c
+	w.statsMu.Unlock()
+}
+
+// getClient returns the current protocol client, or nil if not connected yet.
+func (w *playerWorker) getClient() *protocol.Client {
+	w.statsMu.RLock()
+	defer w.statsMu.RUnlock()
+	return w.client
 }
 
 // Ingress implements app.PlayerIngressPort using Sendspin wire protocol.
@@ -109,7 +146,11 @@ func (ing *Ingress) runDiscovery() {
 		ServiceName: "sendspin-voip",
 		ServerMode:  false,
 	})
+	// discMgr is read by StopAll under ing.mu, so publish it under the same lock
+	// rather than racing with a concurrent shutdown.
+	ing.mu.Lock()
 	ing.discMgr = mgr
+	ing.mu.Unlock()
 
 	if err := mgr.Browse(); err != nil {
 		ing.logger.Warn("mDNS browse failed, will retry", "err", err)
@@ -183,19 +224,21 @@ func (ing *Ingress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs 
 
 	// If already registered with identical codecs and connected, skip
 	if existing, ok := ing.workers[player.ID]; ok {
-		if codecsEqual(existing.codecs, codecs) && existing.client != nil && existing.client.IsConnected() {
-			return nil
-		}
 		existing.statsMu.RLock()
+		existingClient := existing.client
 		if existing.currentVolume > 0 {
 			initialVol = existing.currentVolume
 		}
 		initialMuted = existing.isMuted
 		existing.statsMu.RUnlock()
 
+		if codecsEqual(existing.codecs, codecs) && existingClient != nil && existingClient.IsConnected() {
+			return nil
+		}
+
 		existing.cancel()
-		if existing.client != nil {
-			existing.client.Close()
+		if existingClient != nil {
+			existingClient.Close()
 		}
 		delete(ing.workers, player.ID)
 	}
@@ -227,9 +270,9 @@ func (ing *Ingress) UnregisterPlayer(playerID string) error {
 
 	if worker, ok := ing.workers[playerID]; ok {
 		worker.cancel()
-		if worker.client != nil {
-			_ = worker.client.SendGoodbye("shutdown")
-			worker.client.Close()
+		if client := worker.getClient(); client != nil {
+			_ = client.SendGoodbye("shutdown")
+			client.Close()
 		}
 		delete(ing.workers, playerID)
 		ing.logger.Info("Unregistered virtual player from Music Assistant", "player_id", playerID)
@@ -336,13 +379,17 @@ func (ing *Ingress) SendPauseToUpstream(playerID string) {
 	ing.mu.Lock()
 	w, ok := ing.workers[playerID]
 	ing.mu.Unlock()
-	if !ok || w.client == nil || !w.client.IsConnected() {
+	if !ok {
+		return
+	}
+	client := w.getClient()
+	if client == nil || !client.IsConnected() {
 		return
 	}
 	payload := map[string]any{
 		"controller": map[string]any{"command": "pause"},
 	}
-	if err := w.client.Send("client/command", payload); err != nil {
+	if err := client.Send("client/command", payload); err != nil {
 		ing.logger.Warn("Failed to send pause to upstream Music Assistant", "player_id", playerID, "err", err)
 	} else {
 		ing.logger.Info("Sent pause to upstream Music Assistant (phone hung up)", "player_id", playerID)
@@ -437,7 +484,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		w.clockOffsetUs = 0
 		w.statsMu.Unlock()
 
-		w.client = client
+		w.setClient(client)
 		w.statsMu.RLock()
 		initVol := w.currentVolume
 		initMuted := w.isMuted
@@ -451,8 +498,13 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		var currentChannels = primaryChannels
 		var currentBitDepth = primaryBitDepth
 
-		opusDecoder, _ := opus.NewDecoderWithOutput(48000, 2)
-		pcm16Buf := make([]int16, 5760*2) // up to 120ms frame at 48kHz stereo
+		opusDecoder, decErr := opus.NewDecoderWithOutput(48000, maxOpusChannels)
+		opusDecoderReady := decErr == nil
+		if decErr != nil {
+			ing.logger.Warn("Failed to create Opus decoder", "player_id", w.cfg.ID, "err", decErr)
+		}
+		// Room for the largest Opus frame (120 ms at 48 kHz) in stereo.
+		pcm16Buf := make([]int16, maxOpusFrameSamples*maxOpusChannels)
 
 		done := client.Done()
 
@@ -479,9 +531,19 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					if currentCodec == "" {
 						currentCodec = "pcm"
 					}
+					// Normalize the announced format up front. A server that omits
+					// (or mis-reports) these leaves every downstream consumer —
+					// including the fixed-size Opus decode buffer below — working
+					// from a bogus frame geometry.
 					currentRate = startMsg.Player.SampleRate
-					currentChannels = startMsg.Player.Channels
+					if currentRate <= 0 {
+						currentRate = primaryRate
+					}
+					currentChannels = normalizeChannels(startMsg.Player.Channels, primaryChannels)
 					currentBitDepth = startMsg.Player.BitDepth
+					if currentBitDepth <= 0 {
+						currentBitDepth = 16
+					}
 				}
 				w.statsMu.Lock()
 				w.currentCodec = currentCodec
@@ -492,10 +554,13 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				w.clockOffsetUs = 0
 				w.statsMu.Unlock()
 
-				if currentChannels > 0 && (currentChannels == 1 || currentChannels == 2) {
-					if dec, err := opus.NewDecoderWithOutput(48000, currentChannels); err == nil {
-						opusDecoder = dec
-					}
+				if dec, err := opus.NewDecoderWithOutput(48000, currentChannels); err == nil {
+					opusDecoder = dec
+					opusDecoderReady = true
+				} else {
+					opusDecoderReady = false
+					ing.logger.Warn("Failed to build Opus decoder for stream format",
+						"player_id", w.cfg.ID, "channels", currentChannels, "err", err)
 				}
 
 				ing.logger.Info("Sendspin stream start received",
@@ -579,11 +644,21 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 
 				if currentCodec == "opus" {
 					var samples []int32
-					n, err := opusDecoder.DecodeToInt16(chunk.Data, pcm16Buf)
-					if err == nil && n > 0 {
-						samples = make([]int32, n*currentChannels)
-						for i := 0; i < len(samples); i++ {
-							samples[i] = int32(pcm16Buf[i])
+					if opusDecoderReady {
+						n, err := opusDecoder.DecodeToInt16(chunk.Data, pcm16Buf)
+						if err == nil && n > 0 {
+							// n is samples *per channel*. Clamp against the decode
+							// buffer: a frame longer than the buffer, or a stream
+							// that reports more channels than the decoder was built
+							// for, would otherwise index past the end and panic.
+							total := n * currentChannels
+							if total > len(pcm16Buf) {
+								total = len(pcm16Buf)
+							}
+							samples = make([]int32, total)
+							for i := 0; i < total; i++ {
+								samples[i] = int32(pcm16Buf[i])
+							}
 						}
 					}
 					audioChunk := domain.AudioChunk{
@@ -718,9 +793,9 @@ func (ing *Ingress) StopAll() error {
 	ing.cancel()
 	for _, w := range ing.workers {
 		w.cancel()
-		if w.client != nil {
-			_ = w.client.SendGoodbye("shutdown")
-			w.client.Close()
+		if client := w.getClient(); client != nil {
+			_ = client.SendGoodbye("shutdown")
+			client.Close()
 		}
 	}
 	if ing.discMgr != nil {
