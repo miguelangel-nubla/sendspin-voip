@@ -141,6 +141,25 @@ func (ing *Ingress) RegisterPlayer(player domain.PlayerConfig, handler app.Playe
 	return nil
 }
 
+// SendPauseToUpstream sends a pause command to Music Assistant for the given player.
+// This is called when the remote SIP phone hangs up, to stop MA from continuing to stream.
+func (ing *Ingress) SendPauseToUpstream(playerID string) {
+	ing.mu.Lock()
+	w, ok := ing.workers[playerID]
+	ing.mu.Unlock()
+	if !ok || w.client == nil || !w.client.IsConnected() {
+		return
+	}
+	payload := map[string]any{
+		"controller": map[string]any{"command": "pause"},
+	}
+	if err := w.client.Send("client/command", payload); err != nil {
+		ing.logger.Warn("Failed to send pause to upstream Music Assistant", "player_id", playerID, "err", err)
+	} else {
+		ing.logger.Info("Sent pause to upstream Music Assistant (phone hung up)", "player_id", playerID)
+	}
+}
+
 func (ing *Ingress) runPlayerClient(w *playerWorker) {
 	for {
 		select {

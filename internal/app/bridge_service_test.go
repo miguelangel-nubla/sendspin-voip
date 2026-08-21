@@ -135,6 +135,8 @@ func (m *mockIngress) StopAll() error {
 	return nil
 }
 
+func (m *mockIngress) SendPauseToUpstream(playerID string) {}
+
 func TestBridgeService_LifecycleAndPlayback(t *testing.T) {
 	sipCaller := &mockSIPCaller{}
 	rtpStreamer := &mockRTPStreamer{}

@@ -263,6 +263,7 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 	select {
 	case <-dialog.Done():
 		s.logger.Info("Remote SIP phone hung up", "player_id", cfg.ID, "target", cfg.SIPTarget)
+		s.ingress.SendPauseToUpstream(cfg.ID)
 		s.terminatePlayerCall(cfg.ID, true)
 	case <-session.Ctx.Done():
 		// Local termination

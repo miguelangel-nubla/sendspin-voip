@@ -62,6 +62,9 @@ type AudioTranscoderPort interface {
 type PlayerIngressPort interface {
 	// RegisterPlayer creates and starts a virtual Sendspin player client.
 	RegisterPlayer(player domain.PlayerConfig, handler PlayerEventHandler) error
+	// SendPauseToUpstream sends a pause command to Music Assistant for the given player.
+	// Called when the remote phone hangs up to stop the upstream stream.
+	SendPauseToUpstream(playerID string)
 	// StopAll disconnects all virtual players.
 	StopAll() error
 }
