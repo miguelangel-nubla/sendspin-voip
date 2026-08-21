@@ -12,6 +12,14 @@ import (
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
 )
 
+const (
+	// playerDiscoveryInterval is how often each player re-probes its downstream
+	// SIP target for codec capability changes.
+	playerDiscoveryInterval = 30 * time.Second
+	// shutdownByeTimeout bounds how long shutdown waits for each SIP BYE.
+	shutdownByeTimeout = 3 * time.Second
+)
+
 // BridgeConfig contains global operational parameters for the bridge.
 type BridgeConfig struct {
 	DefaultBufferMode domain.BufferMode
@@ -22,14 +30,52 @@ type BridgeConfig struct {
 }
 
 type activeCallState struct {
-	session     *domain.CallSession
-	dialog      SIPDialog
-	rtpSession  RTPSession
-	mu          sync.Mutex
-	buffer      []domain.AudioChunk
+	session *domain.CallSession
+	// rtpSession is set once at construction and never reassigned, so it is safe
+	// to read without holding mu.
+	rtpSession RTPSession
+
+	mu     sync.Mutex
+	dialog SIPDialog
+	buffer []domain.AudioChunk
+
 	answered    bool
 	done        chan struct{}
 	lingerTimer *time.Timer
+	// lingerGen is bumped whenever a linger timer is armed or cancelled. A timer
+	// callback that already fired and is blocked on mu compares the generation it
+	// captured, so a stale expiry can never tear down a freshly armed call.
+	lingerGen uint64
+}
+
+// setDialog publishes the SIP dialog once the INVITE has been answered.
+func (c *activeCallState) setDialog(d SIPDialog) {
+	c.mu.Lock()
+	c.dialog = d
+	c.mu.Unlock()
+}
+
+// getDialog returns the SIP dialog, or nil if the call was never answered.
+func (c *activeCallState) getDialog() SIPDialog {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.dialog
+}
+
+// cancelLingerLocked stops any armed linger timer. Callers must hold c.mu.
+func (c *activeCallState) cancelLingerLocked() {
+	if c.lingerTimer != nil {
+		c.lingerTimer.Stop()
+		c.lingerTimer = nil
+	}
+	c.lingerGen++
+}
+
+// cancelLinger stops any armed linger timer.
+func (c *activeCallState) cancelLinger() {
+	c.mu.Lock()
+	c.cancelLingerLocked()
+	c.mu.Unlock()
 }
 
 // BridgeService coordinates Sendspin player ingress with SIP call signaling and RTP media streaming.
@@ -41,6 +87,13 @@ type BridgeService struct {
 	rtpStreamer RTPStreamerPort
 	ingress     PlayerIngressPort
 	stateStore  StateStorePort
+
+	// ctx is cancelled by Shutdown and bounds every background goroutine the
+	// service starts, so nothing re-registers players after teardown begins.
+	ctx          context.Context
+	cancel       context.CancelFunc
+	shutdownOnce sync.Once
+	discoveryWG  sync.WaitGroup
 
 	playersMu   sync.RWMutex
 	players     map[string]*domain.Player
@@ -76,6 +129,8 @@ func NewBridgeService(
 		config.DefaultBufferMode = domain.BufferModeAnnouncement
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	return &BridgeService{
 		logger:      logger,
 		config:      config,
@@ -84,6 +139,8 @@ func NewBridgeService(
 		rtpStreamer: rtpStreamer,
 		ingress:     ingress,
 		stateStore:  stateStore,
+		ctx:         ctx,
+		cancel:      cancel,
 		players:     make(map[string]*domain.Player),
 	}
 }
@@ -117,6 +174,7 @@ func (s *BridgeService) RegisterPlayers(configs []domain.PlayerConfig) error {
 	// Perform initial probe & publish synchronously so players are available immediately
 	for _, cfg := range configs {
 		s.probeAndSyncPlayer(cfg)
+		s.discoveryWG.Add(1)
 		go s.runPlayerDiscoveryLoop(cfg)
 	}
 
@@ -124,16 +182,29 @@ func (s *BridgeService) RegisterPlayers(configs []domain.PlayerConfig) error {
 }
 
 func (s *BridgeService) runPlayerDiscoveryLoop(cfg domain.PlayerConfig) {
-	ticker := time.NewTicker(30 * time.Second)
+	defer s.discoveryWG.Done()
+
+	ticker := time.NewTicker(playerDiscoveryInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		s.probeAndSyncPlayer(cfg)
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.probeAndSyncPlayer(cfg)
+		}
 	}
 }
 
 func (s *BridgeService) probeAndSyncPlayer(cfg domain.PlayerConfig) {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	// Never re-register a player once shutdown has started; doing so would
+	// resurrect ingress connections that StopAll is in the middle of closing.
+	if s.ctx.Err() != nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(s.ctx, 4*time.Second)
 	defer cancel()
 
 	codecs, err := s.sipCaller.ProbeTarget(ctx, cfg.SIPTarget)
@@ -153,6 +224,10 @@ func (s *BridgeService) probeAndSyncPlayer(cfg domain.PlayerConfig) {
 			"target", cfg.SIPTarget,
 			"codecs", codecs,
 		)
+	}
+
+	if s.ctx.Err() != nil {
+		return
 	}
 
 	if err := s.ingress.RegisterPlayerWithCodecs(cfg, codecs, s); err != nil {
@@ -191,10 +266,7 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 			if cur, still := s.activeCalls.Load(playerID); !still || cur != call {
 				call.mu.Unlock()
 			} else {
-				if call.lingerTimer != nil {
-					call.lingerTimer.Stop()
-					call.lingerTimer = nil
-				}
+				call.cancelLingerLocked()
 				call.session.Metadata = meta
 				call.buffer = nil
 				call.mu.Unlock()
@@ -301,8 +373,7 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 		return
 	}
 
-	call.dialog = dialog
-	session.SetState(domain.StateActive)
+	call.setDialog(dialog)
 
 	remoteRTP := dialog.RemoteRTPAddr()
 	if remoteRTP == nil {
@@ -310,6 +381,8 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 		s.terminatePlayerCall(cfg.ID, true)
 		return
 	}
+
+	session.SetState(domain.StateActive)
 
 	activeCodec := cfg.Codec
 	if negotiated := dialog.RemoteCodec(); negotiated != "" && negotiated != cfg.Codec {
@@ -402,13 +475,7 @@ func (s *BridgeService) OnPlaybackState(playerID string, state string) {
 		s.playersMu.Unlock()
 
 		if val, ok := s.activeCalls.Load(playerID); ok {
-			call := val.(*activeCallState)
-			call.mu.Lock()
-			if call.lingerTimer != nil {
-				call.lingerTimer.Stop()
-				call.lingerTimer = nil
-			}
-			call.mu.Unlock()
+			val.(*activeCallState).cancelLinger()
 		}
 	}
 }
@@ -422,10 +489,7 @@ func (s *BridgeService) OnAudioChunk(playerID string, chunk domain.AudioChunk) {
 	call := val.(*activeCallState)
 
 	call.mu.Lock()
-	if call.lingerTimer != nil {
-		call.lingerTimer.Stop()
-		call.lingerTimer = nil
-	}
+	call.cancelLingerLocked()
 	answered := call.answered
 	if !answered {
 		if call.session.EffectiveMod == domain.BufferModeAnnouncement {
@@ -509,13 +573,16 @@ func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 		return
 	}
 
-	if call.lingerTimer != nil {
-		call.lingerTimer.Stop()
-	}
+	call.cancelLingerLocked()
+	gen := call.lingerGen
 
 	call.lingerTimer = time.AfterFunc(lingerDelay, func() {
 		call.mu.Lock()
-		if call.lingerTimer == nil {
+		// A timer that fired just as it was being cancelled (or replaced) blocks
+		// here until the canceller releases mu. The generation check makes that
+		// stale expiry a no-op instead of hanging up a call that has since
+		// resumed playing.
+		if call.lingerGen != gen || call.lingerTimer == nil {
 			call.mu.Unlock()
 			return
 		}
@@ -605,19 +672,14 @@ func (s *BridgeService) terminatePlayerCallSync(playerID string, releaseArbiter 
 	}
 	call := val.(*activeCallState)
 
-	call.mu.Lock()
-	if call.lingerTimer != nil {
-		call.lingerTimer.Stop()
-		call.lingerTimer = nil
-	}
-	call.mu.Unlock()
+	call.cancelLinger()
 
 	call.session.SetState(domain.StateTerminating)
 	call.session.Close()
 
-	if call.dialog != nil {
+	if dialog := call.getDialog(); dialog != nil {
 		byeCtx, cancel := context.WithTimeout(context.Background(), timeout)
-		_ = call.dialog.Bye(byeCtx)
+		_ = dialog.Bye(byeCtx)
 		cancel()
 	}
 
@@ -638,12 +700,7 @@ func (s *BridgeService) terminatePlayerCall(playerID string, releaseArbiter bool
 	}
 	call := val.(*activeCallState)
 
-	call.mu.Lock()
-	if call.lingerTimer != nil {
-		call.lingerTimer.Stop()
-		call.lingerTimer = nil
-	}
-	call.mu.Unlock()
+	call.cancelLinger()
 
 	call.session.SetState(domain.StateTerminating)
 	call.session.Close()
@@ -655,10 +712,10 @@ func (s *BridgeService) terminatePlayerCall(playerID string, releaseArbiter bool
 		}
 
 		// 2. Send SIP BYE
-		if call.dialog != nil {
-			byeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if dialog := call.getDialog(); dialog != nil {
+			byeCtx, cancel := context.WithTimeout(context.Background(), shutdownByeTimeout)
 			defer cancel()
-			_ = call.dialog.Bye(byeCtx)
+			_ = dialog.Bye(byeCtx)
 		}
 
 		// 3. Release arbiter target
@@ -669,14 +726,35 @@ func (s *BridgeService) terminatePlayerCall(playerID string, releaseArbiter bool
 	}()
 }
 
-// Shutdown cleanly stops all active calls and players.
+// Shutdown cleanly stops all active calls and players. It blocks until every
+// SIP BYE has been sent (or timed out), because the caller tears the process
+// down immediately afterwards.
 func (s *BridgeService) Shutdown() {
 	s.logger.Info("Shutting down sendspin-voip bridge...")
-	s.activeCalls.Range(func(key, value any) bool {
-		playerID := key.(string)
-		s.terminatePlayerCall(playerID, true)
+
+	// Stop the discovery loops first so nothing re-registers a player behind us.
+	s.shutdownOnce.Do(s.cancel)
+	s.discoveryWG.Wait()
+
+	// Hang up every active call *synchronously*. terminatePlayerCall defers the
+	// BYE to a goroutine, which the process exit would race: the phones would be
+	// left off-hook with a dead RTP stream until their own session timer fired.
+	var playerIDs []string
+	s.activeCalls.Range(func(key, _ any) bool {
+		playerIDs = append(playerIDs, key.(string))
 		return true
 	})
+
+	var wg sync.WaitGroup
+	for _, playerID := range playerIDs {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			s.terminatePlayerCallSync(id, true, shutdownByeTimeout)
+		}(playerID)
+	}
+	wg.Wait()
+
 	_ = s.ingress.StopAll()
 	_ = s.sipCaller.Stop()
 }
@@ -838,7 +916,7 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		answerTime := call.session.AnswerTime
 		callID := ""
 		if call.dialog != nil {
-			// Dialog wrapper call id
+			callID = call.dialog.CallID()
 		}
 		call.mu.Unlock()
 

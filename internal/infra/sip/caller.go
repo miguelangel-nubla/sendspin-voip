@@ -617,6 +617,11 @@ func (d *DialogWrapper) RemoteCodec() domain.Codec {
 	return d.codec
 }
 
+// CallID returns the SIP Call-ID negotiated for this dialog.
+func (d *DialogWrapper) CallID() string {
+	return d.callID
+}
+
 func (d *DialogWrapper) Bye(ctx context.Context) error {
 	d.notifyDone()
 	if d.session != nil {

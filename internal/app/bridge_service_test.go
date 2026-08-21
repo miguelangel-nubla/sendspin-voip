@@ -14,6 +14,7 @@ import (
 type mockSIPDialog struct {
 	remoteRTP *net.UDPAddr
 	codec     domain.Codec
+	callID    string
 	doneChan  chan struct{}
 	mu        sync.Mutex
 	byeCalled bool
@@ -25,6 +26,10 @@ func (m *mockSIPDialog) RemoteRTPAddr() *net.UDPAddr {
 
 func (m *mockSIPDialog) RemoteCodec() domain.Codec {
 	return m.codec
+}
+
+func (m *mockSIPDialog) CallID() string {
+	return m.callID
 }
 
 func (m *mockSIPDialog) Bye(ctx context.Context) error {
@@ -728,4 +733,117 @@ func TestBridgeService_StateStorePersistence(t *testing.T) {
 	}
 
 	bridge.Shutdown()
+}
+
+// TestBridgeService_ShutdownSendsByeSynchronously pins the contract that
+// Shutdown does not return until every active call has been hung up. main()
+// exits the process the moment Shutdown returns, so a BYE deferred to a
+// goroutine (as terminatePlayerCall does) would never reach the phone and the
+// handset would stay off-hook streaming silence.
+func TestBridgeService_ShutdownSendsByeSynchronously(t *testing.T) {
+	sipCaller := &mockSIPCaller{}
+	rtpStreamer := &mockRTPStreamer{}
+	ingress := &mockIngress{}
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+
+	bridge := NewBridgeService(
+		nil,
+		BridgeConfig{
+			DefaultBufferMode: domain.BufferModeAnnouncement,
+			PickupBufferMs:    500,
+			DrainDelayMs:      50,
+			IdleHangupDelayMs: 60000,
+			ConflictPolicy:    domain.ConflictPolicyPreemptAnnouncements,
+		},
+		arbiter, sipCaller, rtpStreamer, ingress, nil,
+	)
+
+	if err := bridge.RegisterPlayers([]domain.PlayerConfig{{
+		ID: "player-desk", Name: "Desk Phone", SIPTarget: "sip:101@192.168.1.50",
+		Codec: domain.CodecG722, BufferMode: domain.BufferModeAnnouncement, DefaultVolume: 100,
+	}}); err != nil {
+		t.Fatalf("RegisterPlayers failed: %v", err)
+	}
+
+	bridge.OnStreamStart("player-desk", domain.StreamMetadata{Title: "Doorbell"})
+	waitForCallAnswered(t, bridge, "player-desk")
+
+	bridge.Shutdown()
+
+	// Immediately after Shutdown returns — no sleeps, no polling.
+	sipCaller.mu.Lock()
+	dialog := sipCaller.dialog
+	sipCaller.mu.Unlock()
+	if dialog == nil {
+		t.Fatal("expected a dialog to have been created")
+	}
+
+	dialog.mu.Lock()
+	byeCalled := dialog.byeCalled
+	dialog.mu.Unlock()
+	if !byeCalled {
+		t.Error("Shutdown returned before the SIP BYE was sent; the phone would be left off-hook")
+	}
+
+	if _, stillActive := bridge.activeCalls.Load("player-desk"); stillActive {
+		t.Error("expected the active call to be cleared after Shutdown")
+	}
+	if !ingress.stopped {
+		t.Error("expected ingress to be stopped")
+	}
+}
+
+// TestBridgeService_ShutdownStopsDiscoveryLoop verifies the per-player codec
+// discovery goroutines observe shutdown. They used to loop on a bare ticker
+// with no stop condition, so they kept re-registering players against an
+// ingress that StopAll had already torn down.
+func TestBridgeService_ShutdownStopsDiscoveryLoop(t *testing.T) {
+	bridge := NewBridgeService(
+		nil,
+		BridgeConfig{DefaultBufferMode: domain.BufferModeAnnouncement},
+		domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements),
+		&mockSIPCaller{}, &mockRTPStreamer{}, &mockIngress{}, nil,
+	)
+
+	if err := bridge.RegisterPlayers([]domain.PlayerConfig{{
+		ID: "player-desk", Name: "Desk Phone", SIPTarget: "sip:101@192.168.1.50",
+		Codec: domain.CodecG722, DefaultVolume: 100,
+	}}); err != nil {
+		t.Fatalf("RegisterPlayers failed: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		bridge.Shutdown()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown blocked waiting for the discovery loop to exit")
+	}
+
+	// probeAndSyncPlayer must be inert once the service context is cancelled.
+	if bridge.ctx.Err() == nil {
+		t.Error("expected the service context to be cancelled after Shutdown")
+	}
+}
+
+func waitForCallAnswered(t *testing.T, bridge *BridgeService, playerID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if val, ok := bridge.activeCalls.Load(playerID); ok {
+			call := val.(*activeCallState)
+			call.mu.Lock()
+			answered := call.answered
+			call.mu.Unlock()
+			if answered {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("call for %s was never answered", playerID)
 }

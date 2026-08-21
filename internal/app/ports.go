@@ -141,6 +141,8 @@ type SIPDialog interface {
 	RemoteRTPAddr() *net.UDPAddr
 	// RemoteCodec returns the negotiated codec from SDP.
 	RemoteCodec() domain.Codec
+	// CallID returns the SIP Call-ID of the dialog, for correlation in the dashboard and logs.
+	CallID() string
 	// Bye terminates the SIP call cleanly.
 	Bye(ctx context.Context) error
 	// Done returns a channel that closes if the remote party hangs up.
