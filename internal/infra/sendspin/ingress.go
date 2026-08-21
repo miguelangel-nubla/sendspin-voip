@@ -233,31 +233,49 @@ func BuildSupportedFormatsForCodecs(codecs []domain.Codec, preferred domain.Code
 		}
 	}
 
-	ordered := codecs
-	if len(ordered) == 0 {
-		if preferred != "" {
-			ordered = []domain.Codec{preferred, domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}
-		} else {
-			ordered = []domain.Codec{domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}
-		}
-	}
+	ordered := domain.PrioritizeCodecs(preferred, codecs)
+
+	hasOpus := false
+	hasL16 := false
+	hasG722 := false
+	hasG711 := false
 
 	for _, c := range ordered {
 		switch c {
 		case domain.CodecOpus:
-			addFormat(protocol.AudioFormat{Codec: "opus", SampleRate: 48000, Channels: 2, BitDepth: 16})
-			addFormat(protocol.AudioFormat{Codec: "opus", SampleRate: 48000, Channels: 1, BitDepth: 16})
+			hasOpus = true
 		case domain.CodecL16:
-			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 48000, Channels: 2, BitDepth: 16})
-			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 44100, Channels: 2, BitDepth: 16})
+			hasL16 = true
 		case domain.CodecG722:
-			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 16000, Channels: 1, BitDepth: 16})
+			hasG722 = true
 		case domain.CodecPCMU, domain.CodecPCMA:
-			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 8000, Channels: 1, BitDepth: 16})
+			hasG711 = true
 		}
 	}
 
-	// Always append standard fallback PCM formats
+	// 1. Opus Full-band (Highest fidelity stereo/mono, zero-transcode)
+	if hasOpus {
+		addFormat(protocol.AudioFormat{Codec: "opus", SampleRate: 48000, Channels: 2, BitDepth: 16})
+		addFormat(protocol.AudioFormat{Codec: "opus", SampleRate: 48000, Channels: 1, BitDepth: 16})
+	}
+
+	// 2. L16 Uncompressed PCM (48kHz/44.1kHz Stereo)
+	if hasL16 {
+		addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 48000, Channels: 2, BitDepth: 16})
+		addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 44100, Channels: 2, BitDepth: 16})
+	}
+
+	// 3. Wideband 16kHz Mono (Native G.722 match: 1 channel, 16000Hz)
+	if hasG722 {
+		addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 16000, Channels: 1, BitDepth: 16})
+	}
+
+	// 4. Narrowband 8kHz Mono (Native G.711 match: 1 channel, 8000Hz)
+	if hasG711 {
+		addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 8000, Channels: 1, BitDepth: 16})
+	}
+
+	// 5. Standard PCM Stereo fallbacks
 	addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 48000, Channels: 2, BitDepth: 16})
 	addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 44100, Channels: 2, BitDepth: 16})
 

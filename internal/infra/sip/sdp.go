@@ -38,13 +38,7 @@ func BuildSDPOffer(localIP string, rtpPort int, codec domain.Codec) (string, err
 	}
 
 	// Build ordered codec list with preferred codec first, followed by fallbacks in fidelity order
-	allCodecs := []domain.Codec{codec}
-	fallbackCodecs := []domain.Codec{domain.CodecOpus, domain.CodecL16, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}
-	for _, c := range fallbackCodecs {
-		if c != codec {
-			allCodecs = append(allCodecs, c)
-		}
-	}
+	allCodecs := domain.PrioritizeCodecs(codec, nil)
 
 	var formats []string
 	var rtpmapAttrs []sdp.Attribute

@@ -63,7 +63,7 @@ func (m *mockSIPCaller) RegistrationStatus() SIPStatus {
 	}
 }
 func (m *mockSIPCaller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Codec, error) {
-	return []domain.Codec{domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}, nil
+	return []domain.Codec{domain.CodecOpus, domain.CodecL16, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}, nil
 }
 func (m *mockSIPCaller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPPort int) (SIPDialog, error) {
 	m.mu.Lock()

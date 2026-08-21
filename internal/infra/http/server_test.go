@@ -24,7 +24,7 @@ func (d *dummySIPCaller) RegistrationStatus() app.SIPStatus {
 	}
 }
 func (d *dummySIPCaller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Codec, error) {
-	return []domain.Codec{domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}, nil
+	return []domain.Codec{domain.CodecOpus, domain.CodecL16, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}, nil
 }
 func (d *dummySIPCaller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPPort int) (app.SIPDialog, error) {
 	return nil, nil

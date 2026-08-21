@@ -17,6 +17,38 @@ const (
 	CodecL16  Codec = "l16"  // Linear 16-bit uncompressed PCM (48kHz/44.1kHz, payload type 10/11/97)
 )
 
+// DefaultCodecPreferences is the canonical list of supported audio codecs in descending fidelity order.
+var DefaultCodecPreferences = []Codec{
+	CodecOpus,
+	CodecL16,
+	CodecG722,
+	CodecPCMU,
+	CodecPCMA,
+}
+
+// PrioritizeCodecs returns an ordered codec list with preferred codec first (if set) followed by available codecs without duplicates.
+func PrioritizeCodecs(preferred Codec, available []Codec) []Codec {
+	base := available
+	if len(base) == 0 {
+		base = DefaultCodecPreferences
+	}
+	if preferred == "" {
+		res := make([]Codec, len(base))
+		copy(res, base)
+		return res
+	}
+
+	result := []Codec{preferred}
+	seen := map[Codec]bool{preferred: true}
+	for _, c := range base {
+		if !seen[c] {
+			result = append(result, c)
+			seen[c] = true
+		}
+	}
+	return result
+}
+
 // ParseCodec normalizes and parses a codec string.
 func ParseCodec(s string) (Codec, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {

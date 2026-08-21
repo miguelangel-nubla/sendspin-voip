@@ -360,7 +360,7 @@ func (c *Caller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Co
 	}
 
 	// Fallback to all standard VoIP codecs if remote replied OK without SDP body
-	return []domain.Codec{domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}, nil
+	return domain.DefaultCodecPreferences, nil
 }
 
 // Dial initiates a SIP call with auto-answer headers and returns an active dialog.

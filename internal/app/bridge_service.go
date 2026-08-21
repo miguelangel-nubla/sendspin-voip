@@ -123,7 +123,7 @@ func (s *BridgeService) probeAndSyncPlayer(cfg domain.PlayerConfig) {
 	if err != nil {
 		s.logger.Debug("Downstream SIP target probe note", "player_id", cfg.ID, "target", cfg.SIPTarget, "err", err)
 		// If probe fails (e.g. PBX starting up or strict firewall), still register with fallback codecs so player is not blocked
-		codecs = []domain.Codec{cfg.Codec, domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}
+		codecs = domain.PrioritizeCodecs(cfg.Codec, nil)
 	} else {
 		s.logger.Info("Discovered downstream SIP target capabilities",
 			"player_id", cfg.ID,
@@ -700,13 +700,7 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 	})
 
 	// 2. Gather Consumer Info (SIP/RTP Egress)
-	allCodecs := []domain.Codec{cfg.Codec}
-	fallbackCodecs := []domain.Codec{domain.CodecOpus, domain.CodecL16, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}
-	for _, c := range fallbackCodecs {
-		if c != cfg.Codec {
-			allCodecs = append(allCodecs, c)
-		}
-	}
+	allCodecs := domain.PrioritizeCodecs(cfg.Codec, nil)
 	var offeredSIPCodecs []string
 	for _, c := range allCodecs {
 		offeredSIPCodecs = append(offeredSIPCodecs, fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(c)), c.PayloadType(), c.RTPClockRate()))
