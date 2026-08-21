@@ -290,6 +290,79 @@ func (c *Caller) LocalIP() string {
 	return c.localIP
 }
 
+// ProbeTarget queries the remote SIP endpoint via OPTIONS to determine availability and supported codecs.
+func (c *Caller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Codec, error) {
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("SIP caller is not started")
+	}
+
+	var recipientURI sip.Uri
+	targetStr := targetURI
+	if !strings.HasPrefix(targetStr, "sip:") && !strings.HasPrefix(targetStr, "sips:") {
+		targetStr = "sip:" + targetStr
+	}
+
+	if err := sip.ParseUri(targetStr, &recipientURI); err != nil {
+		return nil, fmt.Errorf("invalid target URI %q: %w", targetURI, err)
+	}
+
+	fromURI := sip.Uri{
+		User: c.config.Username,
+		Host: c.localIP,
+		Port: c.config.LocalSIPPort,
+	}
+	if fromURI.User == "" {
+		fromURI.User = "sendspin"
+	}
+
+	req := sip.NewRequest(sip.OPTIONS, recipientURI)
+	req.AppendHeader(&sip.FromHeader{Address: fromURI})
+	req.AppendHeader(&sip.ToHeader{Address: recipientURI})
+	req.AppendHeader(&sip.ContactHeader{
+		Address: sip.Uri{
+			User: fromURI.User,
+			Host: c.localIP,
+			Port: c.config.LocalSIPPort,
+		},
+	})
+	req.AppendHeader(sip.NewHeader("Accept", "application/sdp"))
+
+	res, err := client.Do(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("OPTIONS request failed: %w", err)
+	}
+
+	// Handle PBX Digest Authentication challenge if required
+	if (res.StatusCode == 401 || res.StatusCode == 407) && c.config.Password != "" {
+		res, err = client.DoDigestAuth(ctx, req, res, sipgo.DigestAuth{
+			Username: c.config.Username,
+			Password: c.config.Password,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("OPTIONS digest auth failed: %w", err)
+		}
+	}
+
+	if res.StatusCode >= 400 && res.StatusCode != 486 && res.StatusCode != 200 {
+		return nil, fmt.Errorf("target returned status %d %s", res.StatusCode, res.Reason)
+	}
+
+	body := string(res.Body())
+	if len(body) > 0 && strings.Contains(strings.ToLower(body), "m=audio") {
+		codecs := ParseSDPCodecs(body)
+		if len(codecs) > 0 {
+			return codecs, nil
+		}
+	}
+
+	// Fallback to all standard VoIP codecs if remote replied OK without SDP body
+	return []domain.Codec{domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}, nil
+}
+
 // Dial initiates a SIP call with auto-answer headers and returns an active dialog.
 func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPPort int) (app.SIPDialog, error) {
 	c.mu.Lock()

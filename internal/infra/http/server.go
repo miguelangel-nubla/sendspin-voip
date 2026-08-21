@@ -258,13 +258,25 @@ func (s *Server) handleAPICodecs(w http.ResponseWriter, r *http.Request) {
 			"sdp_name":         "opus/48000/2",
 			"rtp_clock_rate":   48000,
 			"audio_sample_rate": 48000,
-			"payload_type":     111,
-			"bitrate_kbps":     96,
+			"payload_type":     96,
+			"bitrate_kbps":     128,
+			"channels":         2,
+		},
+		{
+			"codec":            "l16",
+			"name":             "L16 Linear PCM (Uncompressed)",
+			"sdp_name":         "L16/48000/2",
+			"rtp_clock_rate":   48000,
+			"audio_sample_rate": 48000,
+			"payload_type":     97,
+			"bitrate_kbps":     1536,
 			"channels":         2,
 		},
 	}
 
-	_ = json.NewEncoder(w).Encode(codecs)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"codecs": codecs,
+	})
 }
 
 // handleDashboard renders the modern live Web UI.

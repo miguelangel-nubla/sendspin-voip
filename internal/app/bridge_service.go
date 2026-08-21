@@ -84,30 +84,64 @@ func NewBridgeService(
 	}
 }
 
-// RegisterPlayers registers all configured players into the bridge and ingress adapter.
+// RegisterPlayers registers configured players and starts dynamic downstream discovery.
 func (s *BridgeService) RegisterPlayers(configs []domain.PlayerConfig) error {
 	s.playersMu.Lock()
-	defer s.playersMu.Unlock()
-
 	for _, cfg := range configs {
 		p, err := domain.NewPlayer(cfg)
 		if err != nil {
+			s.playersMu.Unlock()
 			return fmt.Errorf("invalid player config %s: %w", cfg.ID, err)
 		}
 		s.players[p.Config.ID] = p
+	}
+	s.playersMu.Unlock()
 
-		if err := s.ingress.RegisterPlayer(p.Config, s); err != nil {
-			return fmt.Errorf("failed to register player %s on ingress: %w", p.Config.ID, err)
-		}
-		s.logger.Info("Registered virtual Sendspin player",
-			"player_id", p.Config.ID,
-			"name", p.Config.Name,
-			"target", p.Config.SIPTarget,
-			"codec", p.Config.Codec,
-			"buffer_mode", p.Config.BufferMode,
+	// Perform initial probe & publish synchronously so players are available immediately
+	for _, cfg := range configs {
+		s.probeAndSyncPlayer(cfg)
+		go s.runPlayerDiscoveryLoop(cfg)
+	}
+
+	return nil
+}
+
+func (s *BridgeService) runPlayerDiscoveryLoop(cfg domain.PlayerConfig) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		s.probeAndSyncPlayer(cfg)
+	}
+}
+
+func (s *BridgeService) probeAndSyncPlayer(cfg domain.PlayerConfig) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	codecs, err := s.sipCaller.ProbeTarget(ctx, cfg.SIPTarget)
+	if err != nil {
+		s.logger.Debug("Downstream SIP target probe note", "player_id", cfg.ID, "target", cfg.SIPTarget, "err", err)
+		// If probe fails (e.g. PBX starting up or strict firewall), still register with fallback codecs so player is not blocked
+		codecs = []domain.Codec{cfg.Codec, domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}
+	} else {
+		s.logger.Info("Discovered downstream SIP target capabilities",
+			"player_id", cfg.ID,
+			"target", cfg.SIPTarget,
+			"codecs", codecs,
 		)
 	}
-	return nil
+
+	if err := s.ingress.RegisterPlayerWithCodecs(cfg, codecs, s); err != nil {
+		s.logger.Warn("Failed to register player with discovered codecs", "player_id", cfg.ID, "err", err)
+	} else {
+		s.logger.Info("Registered virtual Sendspin player with dynamic capabilities",
+			"player_id", cfg.ID,
+			"name", cfg.Name,
+			"target", cfg.SIPTarget,
+			"codecs", codecs,
+		)
+	}
 }
 
 // OnStreamStart handles stream initiation from Music Assistant.
@@ -627,11 +661,16 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 	var prodFormat string
 	bitrateIn := 0
 	if ingStats.Codec != "" {
-		prodFormat = fmt.Sprintf("%s %dHz %dch %dbit", strings.ToUpper(ingStats.Codec), ingStats.SampleRate, ingStats.Channels, ingStats.BitDepth)
-		bitrateIn = (ingStats.SampleRate * ingStats.Channels * ingStats.BitDepth) / 1000
+		if strings.EqualFold(ingStats.Codec, "opus") {
+			prodFormat = fmt.Sprintf("OPUS %dHz %dch", ingStats.SampleRate, ingStats.Channels)
+			bitrateIn = 128
+		} else {
+			prodFormat = fmt.Sprintf("%s %dHz %dch %dbit", strings.ToUpper(ingStats.Codec), ingStats.SampleRate, ingStats.Channels, ingStats.BitDepth)
+			bitrateIn = (ingStats.SampleRate * ingStats.Channels * ingStats.BitDepth) / 1000
+		}
 	} else {
-		prodFormat = "PCM 48000Hz 2ch 16bit"
-		bitrateIn = 1536
+		prodFormat = "OPUS 48000Hz 2ch"
+		bitrateIn = 128
 	}
 
 	ingressURL := ingStats.ServerAddr
@@ -662,7 +701,7 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 
 	// 2. Gather Consumer Info (SIP/RTP Egress)
 	allCodecs := []domain.Codec{cfg.Codec}
-	fallbackCodecs := []domain.Codec{domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA, domain.CodecOpus}
+	fallbackCodecs := []domain.Codec{domain.CodecOpus, domain.CodecL16, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}
 	for _, c := range fallbackCodecs {
 		if c != cfg.Codec {
 			allCodecs = append(allCodecs, c)

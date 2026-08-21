@@ -26,6 +26,7 @@ type IngressConfig struct {
 
 type playerWorker struct {
 	cfg     domain.PlayerConfig
+	codecs  []domain.Codec
 	handler app.PlayerEventHandler
 	client  *protocol.Client
 	cancel  context.CancelFunc
@@ -136,13 +137,32 @@ func (ing *Ingress) runDiscovery() {
 }
 
 // RegisterPlayer spawns a virtual Sendspin player client.
+// RegisterPlayer creates and starts a virtual Sendspin player client.
 func (ing *Ingress) RegisterPlayer(player domain.PlayerConfig, handler app.PlayerEventHandler) error {
+	return ing.RegisterPlayerWithCodecs(player, nil, handler)
+}
+
+// RegisterPlayerWithCodecs creates or updates a virtual Sendspin player with dynamically discovered downstream codecs.
+func (ing *Ingress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs []domain.Codec, handler app.PlayerEventHandler) error {
 	ing.mu.Lock()
 	defer ing.mu.Unlock()
+
+	// If already registered with identical codecs and connected, skip
+	if existing, ok := ing.workers[player.ID]; ok {
+		if codecsEqual(existing.codecs, codecs) && existing.client != nil && existing.client.IsConnected() {
+			return nil
+		}
+		existing.cancel()
+		if existing.client != nil {
+			existing.client.Close()
+		}
+		delete(ing.workers, player.ID)
+	}
 
 	ctx, cancel := context.WithCancel(ing.ctx)
 	worker := &playerWorker{
 		cfg:     player,
+		codecs:  codecs,
 		handler: handler,
 		cancel:  cancel,
 		ctx:     ctx,
@@ -151,6 +171,97 @@ func (ing *Ingress) RegisterPlayer(player domain.PlayerConfig, handler app.Playe
 
 	go ing.runPlayerClient(worker)
 	return nil
+}
+
+// UnregisterPlayer stops and disconnects a virtual player client from Music Assistant.
+func (ing *Ingress) UnregisterPlayer(playerID string) error {
+	ing.mu.Lock()
+	defer ing.mu.Unlock()
+
+	if worker, ok := ing.workers[playerID]; ok {
+		worker.cancel()
+		if worker.client != nil {
+			worker.client.Close()
+		}
+		delete(ing.workers, playerID)
+		ing.logger.Info("Unregistered virtual player from Music Assistant", "player_id", playerID)
+	}
+	return nil
+}
+
+func codecsEqual(a, b []domain.Codec) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// BuildSupportedFormatsForCodecs generates the exact ordered AudioFormat capability list based on discovered SIP codecs.
+func BuildSupportedFormatsForCodecs(codecs []domain.Codec, preferred domain.Codec) ([]protocol.AudioFormat, []string, []int, []int) {
+	var formats []protocol.AudioFormat
+	var supportCodecs []string
+	var supportSampleRates []int
+	var supportChannels []int
+
+	seenFmt := make(map[string]bool)
+	seenCodec := make(map[string]bool)
+	seenRate := make(map[int]bool)
+	seenChan := make(map[int]bool)
+
+	addFormat := func(f protocol.AudioFormat) {
+		key := fmt.Sprintf("%s-%d-%d-%d", f.Codec, f.SampleRate, f.Channels, f.BitDepth)
+		if !seenFmt[key] {
+			formats = append(formats, f)
+			seenFmt[key] = true
+		}
+		if !seenCodec[f.Codec] {
+			supportCodecs = append(supportCodecs, f.Codec)
+			seenCodec[f.Codec] = true
+		}
+		if !seenRate[f.SampleRate] {
+			supportSampleRates = append(supportSampleRates, f.SampleRate)
+			seenRate[f.SampleRate] = true
+		}
+		if !seenChan[f.Channels] {
+			supportChannels = append(supportChannels, f.Channels)
+			seenChan[f.Channels] = true
+		}
+	}
+
+	ordered := codecs
+	if len(ordered) == 0 {
+		if preferred != "" {
+			ordered = []domain.Codec{preferred, domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}
+		} else {
+			ordered = []domain.Codec{domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}
+		}
+	}
+
+	for _, c := range ordered {
+		switch c {
+		case domain.CodecOpus:
+			addFormat(protocol.AudioFormat{Codec: "opus", SampleRate: 48000, Channels: 2, BitDepth: 16})
+			addFormat(protocol.AudioFormat{Codec: "opus", SampleRate: 48000, Channels: 1, BitDepth: 16})
+		case domain.CodecL16:
+			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 48000, Channels: 2, BitDepth: 16})
+			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 44100, Channels: 2, BitDepth: 16})
+		case domain.CodecG722:
+			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 16000, Channels: 1, BitDepth: 16})
+		case domain.CodecPCMU, domain.CodecPCMA:
+			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 8000, Channels: 1, BitDepth: 16})
+		}
+	}
+
+	// Always append standard fallback PCM formats
+	addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 48000, Channels: 2, BitDepth: 16})
+	addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 44100, Channels: 2, BitDepth: 16})
+
+	return formats, supportCodecs, supportSampleRates, supportChannels
 }
 
 // SendPauseToUpstream sends a pause command to Music Assistant for the given player.
@@ -197,102 +308,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 			"server", serverAddr,
 		)
 
-		var supportedFormats []protocol.AudioFormat
-		var supportCodecs []string
-		var supportSampleRates []int
-		var supportChannels []int
-
-		switch w.cfg.Codec {
-		case domain.CodecOpus:
-			supportedFormats = []protocol.AudioFormat{
-				{
-					Codec:      "opus",
-					SampleRate: 48000,
-					Channels:   2,
-					BitDepth:   16,
-				},
-				{
-					Codec:      "pcm",
-					SampleRate: 48000,
-					Channels:   2,
-					BitDepth:   16,
-				},
-			}
-			supportCodecs = []string{"opus", "pcm"}
-			supportSampleRates = []int{48000, 44100}
-			supportChannels = []int{2, 1}
-
-		case domain.CodecG722:
-			// Advertise 16kHz mono as preferred (Music Assistant resamples & downmixes at source!)
-			supportedFormats = []protocol.AudioFormat{
-				{
-					Codec:      "pcm",
-					SampleRate: 16000,
-					Channels:   1,
-					BitDepth:   16,
-				},
-				{
-					Codec:      "pcm",
-					SampleRate: 48000,
-					Channels:   2,
-					BitDepth:   16,
-				},
-				{
-					Codec:      "pcm",
-					SampleRate: 44100,
-					Channels:   2,
-					BitDepth:   16,
-				},
-			}
-			supportCodecs = []string{"pcm"}
-			supportSampleRates = []int{16000, 48000, 44100}
-			supportChannels = []int{1, 2}
-
-		case domain.CodecPCMU, domain.CodecPCMA:
-			// Advertise 8kHz mono as preferred (Music Assistant resamples & downmixes at source!)
-			supportedFormats = []protocol.AudioFormat{
-				{
-					Codec:      "pcm",
-					SampleRate: 8000,
-					Channels:   1,
-					BitDepth:   16,
-				},
-				{
-					Codec:      "pcm",
-					SampleRate: 48000,
-					Channels:   2,
-					BitDepth:   16,
-				},
-				{
-					Codec:      "pcm",
-					SampleRate: 44100,
-					Channels:   2,
-					BitDepth:   16,
-				},
-			}
-			supportCodecs = []string{"pcm"}
-			supportSampleRates = []int{8000, 48000, 44100}
-			supportChannels = []int{1, 2}
-
-		default:
-			supportedFormats = []protocol.AudioFormat{
-				{
-					Codec:      "pcm",
-					SampleRate: 48000,
-					Channels:   2,
-					BitDepth:   16,
-				},
-				{
-					Codec:      "pcm",
-					SampleRate: 44100,
-					Channels:   2,
-					BitDepth:   16,
-				},
-			}
-			supportCodecs = []string{"pcm"}
-			supportSampleRates = []int{48000, 44100}
-			supportChannels = []int{2, 1}
-		}
+		supportedFormats, supportCodecs, supportSampleRates, supportChannels := BuildSupportedFormatsForCodecs(w.codecs, w.cfg.Codec)
 
 		client := protocol.NewClient(protocol.Config{
 			ServerAddr: serverAddr,
@@ -316,6 +332,20 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 			continue
 		}
 
+		var primaryCodec = "opus"
+		var primaryRate = 48000
+		var primaryChannels = 2
+		var primaryBitDepth = 16
+		if len(supportedFormats) > 0 {
+			primaryCodec = supportedFormats[0].Codec
+			primaryRate = supportedFormats[0].SampleRate
+			primaryChannels = supportedFormats[0].Channels
+			primaryBitDepth = supportedFormats[0].BitDepth
+			if primaryBitDepth <= 0 {
+				primaryBitDepth = 16
+			}
+		}
+
 		var offeredFormats []string
 		for _, f := range supportedFormats {
 			offeredFormats = append(offeredFormats, fmt.Sprintf("%s %dHz %dch %dbit", strings.ToUpper(f.Codec), f.SampleRate, f.Channels, f.BitDepth))
@@ -323,10 +353,10 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 
 		w.statsMu.Lock()
 		w.connected = true
-		w.currentCodec = "pcm"
-		w.currentRate = 48000
-		w.currentChannels = 2
-		w.currentBitDepth = 16
+		w.currentCodec = primaryCodec
+		w.currentRate = primaryRate
+		w.currentChannels = primaryChannels
+		w.currentBitDepth = primaryBitDepth
 		w.offeredFormats = offeredFormats
 		w.statsMu.Unlock()
 
@@ -334,10 +364,10 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		ing.logger.Info("Player client successfully connected to Music Assistant", "player_id", w.cfg.ID)
 
 		var currentMeta domain.StreamMetadata
-		var currentCodec = "pcm"
-		var currentRate = 48000
-		var currentChannels = 2
-		var currentBitDepth = 16
+		var currentCodec = primaryCodec
+		var currentRate = primaryRate
+		var currentChannels = primaryChannels
+		var currentBitDepth = primaryBitDepth
 
 		opusDecoder, _ := opus.NewDecoderWithOutput(48000, 2)
 		pcm16Buf := make([]int16, 5760*2) // up to 120ms frame at 48kHz stereo

@@ -39,11 +39,11 @@ bridge:
 # Virtual Player mappings to SIP targets
 # The same SIP target can be mapped to multiple players with different behaviors!
 players:
-  # Player 1: Desk Phone Profile for High-Priority Announcements (Zero clipping)
+  # Player 1: Desk Phone Profile for High-Priority Announcements (Auto discovers best codec, zero speech clipping)
   - id: "office_phone_announcement"
     name: "Office Phone (Announcements)"
     sip_target: "sip:101@192.168.1.50"
-    codec: g722 # g722 (HD Voice), pcmu (u-law), pcma (A-law), opus
+    codec: auto # auto (discovers best: opus > g722 > pcmu > pcma), or lock to specific codec
     buffer_mode: announcement # Plays from sample 0 once answered
     auto_answer: intercom # Force auto-answer on speakerphone
     priority: 10 # High priority: preempts background music on Ext 101
@@ -53,7 +53,7 @@ players:
   - id: "office_phone_music"
     name: "Office Phone (Music)"
     sip_target: "sip:101@192.168.1.50"
-    codec: g722
+    codec: auto
     buffer_mode: live # Locks to live clock sync with other multi-room speakers
     auto_answer: intercom
     priority: 1

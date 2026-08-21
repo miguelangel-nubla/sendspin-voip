@@ -14,11 +14,14 @@ const (
 	CodecPCMA Codec = "pcma" // G.711 A-law (8kHz mono, payload type 8)
 	CodecG722 Codec = "g722" // G.722 Wideband HD Voice (16kHz mono, payload type 9, RTP clock 8kHz)
 	CodecOpus Codec = "opus" // Opus (48kHz, payload type 96/dynamic)
+	CodecL16  Codec = "l16"  // Linear 16-bit uncompressed PCM (48kHz/44.1kHz, payload type 10/11/97)
 )
 
 // ParseCodec normalizes and parses a codec string.
 func ParseCodec(s string) (Codec, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "auto", "best", "":
+		return CodecOpus, nil
 	case "pcmu", "g711u", "ulaw", "u-law", "g711_ulaw":
 		return CodecPCMU, nil
 	case "pcma", "g711a", "alaw", "a-law", "g711_alaw":
@@ -27,8 +30,10 @@ func ParseCodec(s string) (Codec, error) {
 		return CodecG722, nil
 	case "opus":
 		return CodecOpus, nil
+	case "l16", "pcm16", "linear16", "pcm_s16be":
+		return CodecL16, nil
 	default:
-		return "", fmt.Errorf("unsupported codec: %s (supported: pcmu, pcma, g722, opus)", s)
+		return "", fmt.Errorf("unsupported codec: %s (supported: auto, opus, l16, g722, pcmu, pcma)", s)
 	}
 }
 
@@ -43,6 +48,8 @@ func (c Codec) PayloadType() uint8 {
 		return 9
 	case CodecOpus:
 		return 96
+	case CodecL16:
+		return 97
 	default:
 		return 0
 	}
@@ -55,7 +62,7 @@ func (c Codec) SampleRate() int {
 		return 8000
 	case CodecG722:
 		return 16000
-	case CodecOpus:
+	case CodecOpus, CodecL16:
 		return 48000
 	default:
 		return 8000
@@ -70,7 +77,7 @@ func (c Codec) RTPClockRate() uint32 {
 		return 8000
 	case CodecG722:
 		return 8000 // RFC 3551 legacy clock rate
-	case CodecOpus:
+	case CodecOpus, CodecL16:
 		return 48000
 	default:
 		return 8000

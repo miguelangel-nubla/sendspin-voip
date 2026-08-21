@@ -62,6 +62,9 @@ func (m *mockSIPCaller) RegistrationStatus() SIPStatus {
 		Registered: true,
 	}
 }
+func (m *mockSIPCaller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Codec, error) {
+	return []domain.Codec{domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}, nil
+}
 func (m *mockSIPCaller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPPort int) (SIPDialog, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -148,9 +151,19 @@ type mockIngress struct {
 }
 
 func (m *mockIngress) RegisterPlayer(player domain.PlayerConfig, handler PlayerEventHandler) error {
+	return m.RegisterPlayerWithCodecs(player, nil, handler)
+}
+
+func (m *mockIngress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs []domain.Codec, handler PlayerEventHandler) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.registeredCount++
+	return nil
+}
+
+func (m *mockIngress) UnregisterPlayer(playerID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return nil
 }
 

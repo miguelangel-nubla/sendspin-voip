@@ -125,6 +125,8 @@ type SIPCallerPort interface {
 	Stop() error
 	// Dial initiates a SIP INVITE with the appropriate auto-answer headers and local SDP.
 	Dial(ctx context.Context, player domain.PlayerConfig, localRTPPort int) (SIPDialog, error)
+	// ProbeTarget queries the remote SIP target capabilities via OPTIONS request.
+	ProbeTarget(ctx context.Context, targetURI string) ([]domain.Codec, error)
 	// LocalIP returns the advertised local IP address for SDP.
 	LocalIP() string
 	// RegistrationStatus returns current SIP registration and connectivity info.
@@ -165,6 +167,10 @@ type AudioTranscoderPort interface {
 type PlayerIngressPort interface {
 	// RegisterPlayer creates and starts a virtual Sendspin player client.
 	RegisterPlayer(player domain.PlayerConfig, handler PlayerEventHandler) error
+	// RegisterPlayerWithCodecs creates and starts a virtual Sendspin player with dynamic codec capabilities.
+	RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs []domain.Codec, handler PlayerEventHandler) error
+	// UnregisterPlayer stops and disconnects a virtual Sendspin player client.
+	UnregisterPlayer(playerID string) error
 	// SendPauseToUpstream sends a pause command to Music Assistant for the given player.
 	// Called when the remote phone hangs up to stop the upstream stream.
 	SendPauseToUpstream(playerID string)

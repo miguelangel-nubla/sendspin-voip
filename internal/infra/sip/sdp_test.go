@@ -42,4 +42,25 @@ a=sendrecv
 	if negotiatedCodec != domain.CodecG722 {
 		t.Errorf("expected CodecG722, got %s", negotiatedCodec)
 	}
+
+	// Test ParseSDPCodecs
+	multiSDP := `v=0
+o=- 123 1 IN IP4 10.2.3.238
+s=-
+c=IN IP4 10.2.3.238
+t=0 0
+m=audio 19882 RTP/AVP 96 97 9 0 8
+a=rtpmap:96 opus/48000/2
+a=rtpmap:97 L16/48000/2
+a=rtpmap:9 G722/8000
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+`
+	codecs := ParseSDPCodecs(multiSDP)
+	if len(codecs) != 5 {
+		t.Fatalf("expected 5 codecs parsed, got %d: %v", len(codecs), codecs)
+	}
+	if codecs[0] != domain.CodecOpus || codecs[1] != domain.CodecL16 || codecs[2] != domain.CodecG722 || codecs[3] != domain.CodecPCMU || codecs[4] != domain.CodecPCMA {
+		t.Errorf("unexpected codecs order: %v", codecs)
+	}
 }

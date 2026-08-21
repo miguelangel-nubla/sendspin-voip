@@ -23,6 +23,9 @@ func (d *dummySIPCaller) RegistrationStatus() app.SIPStatus {
 		Registered: true,
 	}
 }
+func (d *dummySIPCaller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Codec, error) {
+	return []domain.Codec{domain.CodecOpus, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}, nil
+}
 func (d *dummySIPCaller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPPort int) (app.SIPDialog, error) {
 	return nil, nil
 }
@@ -36,6 +39,12 @@ func (d *dummyRTPStreamer) CreateSession(codec domain.Codec) (app.RTPSession, er
 type dummyIngress struct{}
 
 func (d *dummyIngress) RegisterPlayer(player domain.PlayerConfig, handler app.PlayerEventHandler) error {
+	return nil
+}
+func (d *dummyIngress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs []domain.Codec, handler app.PlayerEventHandler) error {
+	return nil
+}
+func (d *dummyIngress) UnregisterPlayer(playerID string) error {
 	return nil
 }
 func (d *dummyIngress) SendPauseToUpstream(playerID string) {}

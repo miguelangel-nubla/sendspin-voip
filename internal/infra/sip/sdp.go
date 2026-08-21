@@ -37,9 +37,9 @@ func BuildSDPOffer(localIP string, rtpPort int, codec domain.Codec) (string, err
 		},
 	}
 
-	// Build ordered codec list with preferred codec first, followed by fallbacks
+	// Build ordered codec list with preferred codec first, followed by fallbacks in fidelity order
 	allCodecs := []domain.Codec{codec}
-	fallbackCodecs := []domain.Codec{domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA, domain.CodecOpus}
+	fallbackCodecs := []domain.Codec{domain.CodecOpus, domain.CodecL16, domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA}
 	for _, c := range fallbackCodecs {
 		if c != codec {
 			allCodecs = append(allCodecs, c)
@@ -60,6 +60,8 @@ func BuildSDPOffer(localIP string, rtpPort int, codec domain.Codec) (string, err
 			rtpmapAttrs = append(rtpmapAttrs, sdp.NewAttribute("rtpmap", "9 G722/8000"))
 		case domain.CodecOpus:
 			rtpmapAttrs = append(rtpmapAttrs, sdp.NewAttribute("rtpmap", "96 opus/48000/2"))
+		case domain.CodecL16:
+			rtpmapAttrs = append(rtpmapAttrs, sdp.NewAttribute("rtpmap", "97 L16/48000/2"))
 		}
 	}
 
@@ -121,8 +123,10 @@ func ParseRemoteSDP(sdpRaw string, fallbackHost string) (*net.UDPAddr, domain.Co
 					selectedCodec = domain.CodecPCMA
 				case 0:
 					selectedCodec = domain.CodecPCMU
-				case 96, 97, 98:
+				case 96:
 					selectedCodec = domain.CodecOpus
+				case 10, 11, 97:
+					selectedCodec = domain.CodecL16
 				}
 				break
 			}
@@ -145,4 +149,61 @@ func ParseRemoteSDP(sdpRaw string, fallbackHost string) (*net.UDPAddr, domain.Co
 	}
 
 	return &net.UDPAddr{IP: ip, Port: remotePort}, selectedCodec, nil
+}
+
+// ParseSDPCodecs extracts all supported audio codecs present in an SDP description.
+func ParseSDPCodecs(sdpRaw string) []domain.Codec {
+	sd := &sdp.SessionDescription{}
+	if err := sd.Unmarshal([]byte(sdpRaw)); err != nil {
+		return nil
+	}
+
+	var codecs []domain.Codec
+	seen := make(map[domain.Codec]bool)
+
+	for _, m := range sd.MediaDescriptions {
+		if strings.EqualFold(m.MediaName.Media, "audio") {
+			for _, attr := range m.Attributes {
+				if strings.EqualFold(attr.Key, "rtpmap") {
+					val := strings.ToLower(attr.Value)
+					if strings.Contains(val, "opus") && !seen[domain.CodecOpus] {
+						codecs = append(codecs, domain.CodecOpus)
+						seen[domain.CodecOpus] = true
+					} else if (strings.Contains(val, "l16") || strings.Contains(val, "linear16")) && !seen[domain.CodecL16] {
+						codecs = append(codecs, domain.CodecL16)
+						seen[domain.CodecL16] = true
+					} else if strings.Contains(val, "g722") && !seen[domain.CodecG722] {
+						codecs = append(codecs, domain.CodecG722)
+						seen[domain.CodecG722] = true
+					} else if (strings.Contains(val, "pcmu") || strings.Contains(val, "ulaw")) && !seen[domain.CodecPCMU] {
+						codecs = append(codecs, domain.CodecPCMU)
+						seen[domain.CodecPCMU] = true
+					} else if (strings.Contains(val, "pcma") || strings.Contains(val, "alaw")) && !seen[domain.CodecPCMA] {
+						codecs = append(codecs, domain.CodecPCMA)
+						seen[domain.CodecPCMA] = true
+					}
+				}
+			}
+
+			for _, fmtStr := range m.MediaName.Formats {
+				pt, _ := strconv.Atoi(fmtStr)
+				var c domain.Codec
+				switch uint8(pt) {
+				case 9:
+					c = domain.CodecG722
+				case 0:
+					c = domain.CodecPCMU
+				case 8:
+					c = domain.CodecPCMA
+				case 96, 97, 98, 111:
+					c = domain.CodecOpus
+				}
+				if c != "" && !seen[c] {
+					codecs = append(codecs, c)
+					seen[c] = true
+				}
+			}
+		}
+	}
+	return codecs
 }

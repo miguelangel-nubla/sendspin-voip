@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"sync"
@@ -99,6 +100,13 @@ func (t *Transcoder) Transcode(
 		n := t.g722Enc.Encode(dst, pcm16)
 		t.mu.Unlock()
 		return dst[:n], nil
+
+	case domain.CodecL16:
+		payload := make([]byte, len(pcm16)*2)
+		for i, v := range pcm16 {
+			binary.BigEndian.PutUint16(payload[i*2:], uint16(v))
+		}
+		return payload, nil
 
 	case domain.CodecOpus:
 		return nil, fmt.Errorf("opus codec streaming is supported via direct Sendspin stream passthrough; PCM to Opus software re-encoding is not supported")

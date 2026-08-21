@@ -105,21 +105,35 @@ players:
 
 ---
 
+## 🔄 Dynamic Codec Discovery & Audio Pipelines
+
+`sendspin-voip` features an intelligent, dynamic codec negotiation architecture:
+
+1. **Downstream Capability Probing**: When the bridge starts, it queries the downstream target phone/PBX using SIP `OPTIONS` to discover its exact list of supported audio codecs.
+2. **Adaptive Upstream Publishing**: The virtual Sendspin player connects to Music Assistant and advertises format capabilities tailored to that phone:
+   - **Opus Phones**: Advertises `Opus 48000Hz 2ch` for **direct end-to-end zero-transcoding passthrough**.
+   - **G.722 HD Voice Phones**: Advertises `PCM 16000Hz 1ch` for native 16 kHz wideband speech.
+   - **G.711 Narrowband Phones**: Advertises `PCM 8000Hz 1ch` for native 8 kHz narrowband audio.
+3. **Dynamic Reconfiguration**: If a phone is reconfigured with new codecs or reconnects, the bridge detects the change every 30s and automatically updates its capability offer on Music Assistant without restarting.
+4. **`codec: auto` Mode**: Set `codec: auto` (or omit `codec:`) in your `config.yaml` to automatically use the highest-fidelity codec supported by each phone.
+
+---
+
 ## 📊 Web UI & Debug HTTP API
 
 `sendspin-voip` includes an integrated web dashboard and debug API similar to **go2rtc**:
 
-- **Web Dashboard**: Open `http://localhost:8080/` in your browser to inspect all active streams, upstream Sendspin ingress audio formats, live track metadata, downstream SIP targets, RTP ports, and packet counters.
+- **Web Dashboard**: Open `http://localhost:8080/` in your browser to inspect active streams, upstream Sendspin ingress audio formats, live track metadata, downstream SIP targets, offered/negotiated codecs, RTP sockets, and packet counters.
 - **`GET /api/streams`**: Returns a JSON representation of all registered virtual players, upstream audio sources, codecs, and downstream SIP/RTP sessions.
 - **`GET /api/info`**: System metrics, memory usage, goroutines, uptime, and SIP registration status.
-- **`GET /api/codecs`**: Specifications of supported audio codecs (G.722, PCMU, PCMA, Opus, PCM).
+- **`GET /api/codecs`**: Specifications of supported audio codecs (Opus, G.722, PCMU, PCMA, PCM).
 
 ---
 
 ## 🛠️ Supported Hardware & Codecs
 
 - **Hardware**: Any generic SIP phone or paging amplifier (Grandstream, Yealink, Fanvil, Snom, Cisco, Polycom, CyberData, Algo, 2N, etc.) or PBX (Asterisk, FreePBX, 3CX, FreeSWITCH).
-- **Audio Codecs**: G.722 (HD Voice / 16kHz wideband), G.711 µ-law / A-law (8kHz narrowband), and Opus (48kHz direct stream passthrough and decode).
+- **Audio Codecs**: Opus (48kHz direct stream passthrough & pure-Go decode), G.722 (HD Voice / 16kHz wideband), G.711 µ-law / A-law (8kHz narrowband).
 
 ---
 

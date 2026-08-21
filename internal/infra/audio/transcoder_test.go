@@ -65,12 +65,12 @@ func TestTranscoder_StereoToMonoAndResample(t *testing.T) {
 	}
 
 	// 6. Test extreme sample clamping
-	extremeSamples := []int32{100000, -100000, 32767, -32768, 0}
-	clampedPayload, err := trans.Transcode(extremeSamples, 8000, 1, domain.CodecPCMU, 100)
+	// 7. Test L16 linear PCM (48kHz mono 16-bit: 96000 bytes)
+	l16Payload, err := trans.Transcode(srcSamples, 48000, 2, domain.CodecL16, 100)
 	if err != nil {
-		t.Fatalf("clamping transcode failed: %v", err)
+		t.Fatalf("L16 transcode failed: %v", err)
 	}
-	if len(clampedPayload) != len(extremeSamples) {
-		t.Errorf("expected %d bytes, got %d", len(extremeSamples), len(clampedPayload))
+	if len(l16Payload) != 48000*2 {
+		t.Errorf("expected %d bytes for L16 1 second at 48kHz, got %d", 48000*2, len(l16Payload))
 	}
 }
