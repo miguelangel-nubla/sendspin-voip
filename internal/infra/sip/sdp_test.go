@@ -85,3 +85,66 @@ m=audio 10000 RTP/AVP 96 9 0
 		t.Errorf("expected mono L16 rtpmap, got:\n%s", offerL16)
 	}
 }
+
+// TestParseSDPCodecs_DoesNotConflateG722WithG7221 pins the codec-name matching.
+// rtpmap names used to be matched by prefix, so "G7221" and "G722.1" — G.722.1,
+// a different codec at a different bitrate — were both reported as plain G.722.
+// The bridge would then encode G.722 for a phone that never offered it.
+func TestParseSDPCodecs_DoesNotConflateG722WithG7221(t *testing.T) {
+	sdpBody := "v=0\r\n" +
+		"o=- 1 1 IN IP4 192.168.1.60\r\n" +
+		"s=-\r\n" +
+		"c=IN IP4 192.168.1.60\r\n" +
+		"t=0 0\r\n" +
+		"m=audio 5004 RTP/AVP 100 0\r\n" +
+		"a=rtpmap:100 G7221/16000\r\n" +
+		"a=rtpmap:0 PCMU/8000\r\n"
+
+	codecs := ParseSDPCodecs(sdpBody)
+
+	for _, c := range codecs {
+		if c == domain.CodecG722 {
+			t.Fatalf("G7221 (G.722.1) was reported as G.722; got codecs %v", codecs)
+		}
+	}
+	if len(codecs) != 1 || codecs[0] != domain.CodecPCMU {
+		t.Errorf("expected only PCMU to be recognised, got %v", codecs)
+	}
+}
+
+func TestParseRtpmap_ExactEncodingNames(t *testing.T) {
+	tests := []struct {
+		value     string
+		wantCodec domain.Codec
+		wantOK    bool
+	}{
+		{"96 opus/48000/2", domain.CodecOpus, true},
+		{"9 G722/8000", domain.CodecG722, true},
+		{"0 PCMU/8000", domain.CodecPCMU, true},
+		{"8 PCMA/8000", domain.CodecPCMA, true},
+		{"97 L16/48000/1", domain.CodecL16, true},
+		{"100 G7221/16000", "", false},
+		{"101 telephone-event/8000", "", false},
+		{"102 G729/8000", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			_, codec, ok := parseRtpmap(tt.value)
+			if ok != tt.wantOK || codec != tt.wantCodec {
+				t.Errorf("parseRtpmap(%q) = (%q, %v), want (%q, %v)", tt.value, codec, ok, tt.wantCodec, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestBuildSDPOffer_DeclaresPtime(t *testing.T) {
+	offer, err := BuildSDPOffer("192.168.1.10", 10002, domain.CodecG722)
+	if err != nil {
+		t.Fatalf("BuildSDPOffer failed: %v", err)
+	}
+	// The pacer emits a packet every 20ms; the offer must say so.
+	if !strings.Contains(offer, "a=ptime:20") {
+		t.Errorf("expected a=ptime:20 in the SDP offer, got:\n%s", offer)
+	}
+}

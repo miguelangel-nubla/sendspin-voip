@@ -82,6 +82,14 @@ func BuildSDPOffer(localIP string, rtpPort int, codec domain.Codec) (string, err
 		}, rtpmapAttrs...),
 	}
 
+	// The RTP pacer emits one packet every 20 ms. Declare that explicitly so a
+	// phone that would otherwise assume a different packetization interval sizes
+	// its jitter buffer correctly.
+	media.Attributes = append(media.Attributes,
+		sdp.NewAttribute("ptime", "20"),
+		sdp.NewAttribute("maxptime", "20"),
+	)
+
 	sd.MediaDescriptions = append(sd.MediaDescriptions, &media)
 
 	bytes, err := sd.Marshal()
@@ -247,17 +255,27 @@ func parseRtpmap(value string) (pt uint8, codec domain.Codec, ok bool) {
 	if err != nil {
 		return 0, "", false
 	}
+	// An rtpmap value looks like "96 opus/48000/2"; the encoding name is the
+	// segment before the first "/". Match it exactly rather than by prefix:
+	// prefix matching folds G7221 and G722.1 (G.722.1 — a different codec, at a
+	// different clock rate and bitrate) into plain G.722, so a phone offering
+	// only G.722.1 would be told to expect G.722 and receive unintelligible
+	// audio. The same trap applies to L16 vs L16E and PCMU vs PCMU-WB.
 	name := parts[1]
-	switch {
-	case strings.HasPrefix(name, "opus"):
+	if i := strings.IndexByte(name, '/'); i >= 0 {
+		name = name[:i]
+	}
+
+	switch name {
+	case "opus":
 		return uint8(pt64), domain.CodecOpus, true
-	case strings.HasPrefix(name, "l16") || strings.HasPrefix(name, "linear16"):
+	case "l16", "linear16":
 		return uint8(pt64), domain.CodecL16, true
-	case strings.HasPrefix(name, "g722"):
+	case "g722":
 		return uint8(pt64), domain.CodecG722, true
-	case strings.HasPrefix(name, "pcmu") || strings.HasPrefix(name, "ulaw"):
+	case "pcmu", "ulaw":
 		return uint8(pt64), domain.CodecPCMU, true
-	case strings.HasPrefix(name, "pcma") || strings.HasPrefix(name, "alaw"):
+	case "pcma", "alaw":
 		return uint8(pt64), domain.CodecPCMA, true
 	default:
 		return uint8(pt64), "", false
