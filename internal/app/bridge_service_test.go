@@ -53,7 +53,7 @@ type mockSIPCaller struct {
 }
 
 func (m *mockSIPCaller) Start(ctx context.Context) error { return nil }
-func (m *mockSIPCaller) Stop() error                    { return nil }
+func (m *mockSIPCaller) Stop() error                     { return nil }
 func (m *mockSIPCaller) LocalIP() string                 { return "127.0.0.1" }
 func (m *mockSIPCaller) RegistrationStatus() SIPStatus {
 	return SIPStatus{
@@ -729,4 +729,3 @@ func TestBridgeService_StateStorePersistence(t *testing.T) {
 
 	bridge.Shutdown()
 }
-

@@ -10,8 +10,8 @@ type ConflictPolicy string
 
 const (
 	ConflictPolicyPreemptAnnouncements ConflictPolicy = "preempt_for_announcements" // Preempt active music for incoming announcements
-	ConflictPolicyPreemptAlways        ConflictPolicy = "preempt_always"             // Always preempt if new priority >= current
-	ConflictPolicyBusy                 ConflictPolicy = "busy"                       // Reject new playback if target is busy
+	ConflictPolicyPreemptAlways        ConflictPolicy = "preempt_always"            // Always preempt if new priority >= current
+	ConflictPolicyBusy                 ConflictPolicy = "busy"                      // Reject new playback if target is busy
 )
 
 // TargetArbiter manages concurrency and preemption for physical SIP targets.

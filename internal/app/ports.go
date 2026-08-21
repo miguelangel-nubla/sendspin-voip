@@ -43,20 +43,20 @@ type RTPStats struct {
 
 // AudioPathDebugInfo describes the end-to-end processing pipeline for a stream.
 type AudioPathDebugInfo struct {
-	Mode                string   `json:"mode"` // idle | buffering | opus_passthrough | transcode
-	Summary             string   `json:"summary"`
-	Stages              []string `json:"stages"`
-	Passthrough         bool     `json:"passthrough"`
-	VolumePercent       int      `json:"volume_percent"`
-	Muted               bool     `json:"muted"`
-	IngressCodec        string   `json:"ingress_codec,omitempty"`
-	IngressFormat       string   `json:"ingress_format,omitempty"`
-	EgressCodec         string   `json:"egress_codec,omitempty"`
-	EgressFormat        string   `json:"egress_format,omitempty"`
-	BufferMode          string   `json:"buffer_mode,omitempty"`
-	PreAnswerBuffered   int      `json:"pre_answer_buffered,omitempty"`
-	PassthroughPackets  uint64   `json:"passthrough_packets,omitempty"`
-	TranscodePackets    uint64   `json:"transcode_packets,omitempty"`
+	Mode               string   `json:"mode"` // idle | buffering | opus_passthrough | transcode
+	Summary            string   `json:"summary"`
+	Stages             []string `json:"stages"`
+	Passthrough        bool     `json:"passthrough"`
+	VolumePercent      int      `json:"volume_percent"`
+	Muted              bool     `json:"muted"`
+	IngressCodec       string   `json:"ingress_codec,omitempty"`
+	IngressFormat      string   `json:"ingress_format,omitempty"`
+	EgressCodec        string   `json:"egress_codec,omitempty"`
+	EgressFormat       string   `json:"egress_format,omitempty"`
+	BufferMode         string   `json:"buffer_mode,omitempty"`
+	PreAnswerBuffered  int      `json:"pre_answer_buffered,omitempty"`
+	PassthroughPackets uint64   `json:"passthrough_packets,omitempty"`
+	TranscodePackets   uint64   `json:"transcode_packets,omitempty"`
 }
 
 // IngressPlayerStats represents runtime metrics for a Sendspin ingress connection.
@@ -233,5 +233,3 @@ type StateStorePort interface {
 	GetPlayerState(playerID string) (PlayerStateRecord, bool)
 	SetPlayerState(playerID string, state PlayerStateRecord) error
 }
-
-

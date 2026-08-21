@@ -14,4 +14,3 @@ type StreamMetadata struct {
 	Duration    time.Duration
 	StreamTitle string
 }
-

@@ -59,7 +59,7 @@ type PlayerConfig struct {
 type Player struct {
 	Config     PlayerConfig
 	IsGrouped  bool
-	Volume     int  // 0-100
+	Volume     int // 0-100
 	IsMuted    bool
 	IsPlaying  bool
 	CurrentURI string

@@ -588,7 +588,6 @@ func (s *BridgeService) flushActiveRTPBuffer(playerID string) {
 	}
 }
 
-
 // OnGroupUpdate tracks multi-room sync group membership.
 func (s *BridgeService) OnGroupUpdate(playerID string, isGrouped bool) {
 	s.playersMu.Lock()

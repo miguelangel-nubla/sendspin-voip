@@ -14,7 +14,7 @@ import (
 type dummySIPCaller struct{}
 
 func (d *dummySIPCaller) Start(ctx context.Context) error { return nil }
-func (d *dummySIPCaller) Stop() error                    { return nil }
+func (d *dummySIPCaller) Stop() error                     { return nil }
 func (d *dummySIPCaller) LocalIP() string                 { return "127.0.0.1" }
 func (d *dummySIPCaller) RegistrationStatus() app.SIPStatus {
 	return app.SIPStatus{
