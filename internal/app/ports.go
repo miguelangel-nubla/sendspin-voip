@@ -38,6 +38,7 @@ type IngressPlayerStats struct {
 	SampleRate     int                   `json:"sample_rate"`
 	Channels       int                   `json:"channels"`
 	BitDepth       int                   `json:"bit_depth"`
+	OfferedFormats []string              `json:"offered_formats,omitempty"`
 	Metadata       domain.StreamMetadata `json:"metadata"`
 	ChunksReceived uint64                `json:"chunks_received"`
 	BytesReceived  uint64                `json:"bytes_received"`
@@ -45,41 +46,50 @@ type IngressPlayerStats struct {
 
 // ProducerDebugInfo details the upstream audio ingress source.
 type ProducerDebugInfo struct {
-	Type           string `json:"type"` // "Sendspin Ingress"
-	URL            string `json:"url"`
-	Connected      bool   `json:"connected"`
-	Format         string `json:"format"` // e.g. "PCM 16000Hz 1ch 16bit" or "Opus 48000Hz 2ch"
-	Codec          string `json:"codec"`
-	SampleRate     int    `json:"sample_rate"`
-	Channels       int    `json:"channels"`
-	BitDepth       int    `json:"bit_depth"`
-	State          string `json:"state"`
-	Track          string `json:"track,omitempty"`
-	Artist         string `json:"artist,omitempty"`
-	Title          string `json:"title,omitempty"`
-	Album          string `json:"album,omitempty"`
-	ChunksReceived uint64 `json:"chunks_received"`
-	BytesReceived  uint64 `json:"bytes_received"`
+	Type           string   `json:"type"` // "Sendspin Ingress"
+	URL            string   `json:"url"`
+	Connected      bool     `json:"connected"`
+	Format         string   `json:"format"` // e.g. "PCM 16000Hz 1ch 16bit" or "Opus 48000Hz 2ch"
+	Codec          string   `json:"codec"`
+	SampleRate     int      `json:"sample_rate"`
+	Channels       int      `json:"channels"`
+	BitDepth       int      `json:"bit_depth"`
+	BitrateKbps    int      `json:"bitrate_kbps,omitempty"`
+	OfferedFormats []string `json:"offered_formats,omitempty"` // e.g. ["PCM 16000Hz 1ch 16bit", "PCM 48000Hz 2ch 16bit"]
+	State          string   `json:"state"`
+	Track          string   `json:"track,omitempty"`
+	Artist         string   `json:"artist,omitempty"`
+	Title          string   `json:"title,omitempty"`
+	Album          string   `json:"album,omitempty"`
+	AlbumArtist    string   `json:"album_artist,omitempty"`
+	ChunksReceived uint64   `json:"chunks_received"`
+	BytesReceived  uint64   `json:"bytes_received"`
 }
 
 // ConsumerDebugInfo details the downstream SIP/RTP egress destination.
 type ConsumerDebugInfo struct {
-	Type           string  `json:"type"` // "SIP/RTP Egress"
-	URL            string  `json:"url"`  // e.g. "sip:8003@asterisk.local.myol.es"
-	CallID         string  `json:"call_id,omitempty"`
-	State          string  `json:"state"`
-	ConfigCodec    string  `json:"config_codec"`
-	ActiveCodec    string  `json:"active_codec"`
-	Format         string  `json:"format"` // e.g. "G.722 16000Hz 1ch"
-	LocalRTP       string  `json:"local_rtp,omitempty"`
-	RemoteRTP      string  `json:"remote_rtp,omitempty"`
-	BufferMode     string  `json:"buffer_mode"`
-	Priority       int     `json:"priority"`
-	BufferedChunks int     `json:"buffered_chunks"`
-	LingerActive   bool    `json:"linger_active"`
-	PacketsSent    uint64  `json:"packets_sent"`
-	BytesSent      uint64  `json:"bytes_sent"`
-	DurationSec    float64 `json:"duration_sec"`
+	Type           string   `json:"type"` // "SIP/RTP Egress"
+	URL            string   `json:"url"`  // e.g. "sip:8003@asterisk.local.myol.es"
+	CallID         string   `json:"call_id,omitempty"`
+	State          string   `json:"state"`
+	ConfigCodec    string   `json:"config_codec"`
+	ActiveCodec    string   `json:"active_codec"`
+	OfferedCodecs  []string `json:"offered_codecs,omitempty"`
+	NegotiatedSDP  string   `json:"negotiated_sdp,omitempty"`
+	RTPClockRate   uint32   `json:"rtp_clock_rate,omitempty"`
+	PayloadType    uint8    `json:"payload_type,omitempty"`
+	Format         string   `json:"format"` // e.g. "G.722 16000Hz 1ch (64 kbps)"
+	LocalRTP       string   `json:"local_rtp,omitempty"`
+	RemoteRTP      string   `json:"remote_rtp,omitempty"`
+	AutoAnswer     string   `json:"auto_answer,omitempty"`
+	BufferMode     string   `json:"buffer_mode"`
+	Priority       int      `json:"priority"`
+	BufferedChunks int      `json:"buffered_chunks"`
+	LingerActive   bool     `json:"linger_active"`
+	PacketsSent    uint64   `json:"packets_sent"`
+	BytesSent      uint64   `json:"bytes_sent"`
+	BitrateKbps    int      `json:"bitrate_kbps,omitempty"`
+	DurationSec    float64  `json:"duration_sec"`
 }
 
 // StreamDebugInfo provides comprehensive debug information for a virtual player stream.

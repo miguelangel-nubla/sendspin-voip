@@ -180,7 +180,7 @@
     /* Stream Cards Grid */
     .streams-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(580px, 1fr));
       gap: 20px;
     }
 
@@ -348,6 +348,7 @@
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
+      align-items: center;
     }
 
     .tag {
@@ -373,6 +374,30 @@
     .tag.mode {
       background: rgba(56, 189, 248, 0.15);
       color: #7dd3fc;
+    }
+
+    .tag.offered {
+      background: rgba(245, 158, 11, 0.12);
+      color: #fcd34d;
+      border: 1px solid rgba(245, 158, 11, 0.25);
+    }
+
+    .step-subinfo {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 0.74rem;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      margin-top: 4px;
+      padding-top: 4px;
+      border-top: 1px dashed rgba(255, 255, 255, 0.06);
+    }
+
+    .step-subinfo span {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
 
     /* Stats Strip */
@@ -563,6 +588,16 @@
         const trackArtist = prod.artist || '';
         const trackAlbum = prod.album || '';
 
+        let offeredFormatsHTML = '';
+        if (prod.offered_formats && prod.offered_formats.length > 0) {
+          offeredFormatsHTML = prod.offered_formats.map(f => `<span class="tag offered">${escapeHTML(f)}</span>`).join(' ');
+        }
+
+        let sipOfferedHTML = '';
+        if (cons.offered_codecs && cons.offered_codecs.length > 0) {
+          sipOfferedHTML = cons.offered_codecs.map(c => `<span class="tag codec">${escapeHTML(c)}</span>`).join(' ');
+        }
+
         html += `
         <div class="stream-card" id="card-${id}">
           <div class="card-header">
@@ -590,7 +625,7 @@
             <!-- Step 1: Upstream Ingress -->
             <div class="pipeline-step">
               <div class="step-header">
-                <span>1. Upstream (Sendspin / Music Assistant)</span>
+                <span>1. Upstream (Sendspin Ingress / Music Assistant)</span>
                 <span>${prod.connected ? '<span class="dot green"></span> Connected' : '<span class="dot yellow"></span> Waiting'}</span>
               </div>
               <div class="step-content">
@@ -600,14 +635,21 @@
                   <span class="tag">${prod.sample_rate || 48000}Hz</span>
                   <span class="tag">${prod.channels || 2}ch</span>
                   <span class="tag">${prod.bit_depth || 16}bit</span>
+                  ${prod.bitrate_kbps ? `<span class="tag stat">${prod.bitrate_kbps} kbps</span>` : ''}
                 </div>
               </div>
+              ${offeredFormatsHTML ? `
+              <div class="step-subinfo">
+                <span>Offered Formats:</span>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">${offeredFormatsHTML}</div>
+              </div>
+              ` : ''}
             </div>
 
             <!-- Step 2: Downstream Egress -->
             <div class="pipeline-step">
               <div class="step-header">
-                <span>2. Downstream (SIP / RTP Egress)</span>
+                <span>2. Downstream (SIP Signaling & RTP Audio Egress)</span>
                 <span>${cons.state ? escapeHTML(cons.state.toUpperCase()) : 'IDLE'}</span>
               </div>
               <div class="step-content">
@@ -616,13 +658,15 @@
                   <span class="tag codec">${escapeHTML(cons.active_codec ? cons.active_codec.toUpperCase() : (cons.config_codec || 'G722').toUpperCase())}</span>
                   <span class="tag mode">${escapeHTML(cons.buffer_mode || 'announcement')}</span>
                   <span class="tag">Priority ${cons.priority || 0}</span>
+                  ${cons.auto_answer ? `<span class="tag">${escapeHTML(cons.auto_answer)}</span>` : ''}
                 </div>
               </div>
-              ${cons.remote_rtp ? `
-              <div style="font-size: 0.76rem; color: var(--muted); font-family: var(--font-mono); margin-top: 4px;">
-                RTP Socket: ${escapeHTML(cons.local_rtp || '0.0.0.0')} ➔ ${escapeHTML(cons.remote_rtp)}
+              <div class="step-subinfo">
+                <span>SDP Offer:</span>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">${sipOfferedHTML || escapeHTML(cons.negotiated_sdp || 'G.722')}</div>
+                ${cons.remote_rtp ? `<span>RTP Socket: ${escapeHTML(cons.local_rtp || '0.0.0.0')} ➔ ${escapeHTML(cons.remote_rtp)}</span>` : ''}
+                ${cons.duration_sec > 0 ? `<span>Duration: ${formatDuration(cons.duration_sec)}</span>` : ''}
               </div>
-              ` : ''}
             </div>
           </div>
 

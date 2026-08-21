@@ -625,10 +625,13 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 	}
 
 	var prodFormat string
+	bitrateIn := 0
 	if ingStats.Codec != "" {
 		prodFormat = fmt.Sprintf("%s %dHz %dch %dbit", strings.ToUpper(ingStats.Codec), ingStats.SampleRate, ingStats.Channels, ingStats.BitDepth)
+		bitrateIn = (ingStats.SampleRate * ingStats.Channels * ingStats.BitDepth) / 1000
 	} else {
 		prodFormat = "PCM 48000Hz 2ch 16bit"
+		bitrateIn = 1536
 	}
 
 	ingressURL := ingStats.ServerAddr
@@ -645,16 +648,36 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		SampleRate:     ingStats.SampleRate,
 		Channels:       ingStats.Channels,
 		BitDepth:       ingStats.BitDepth,
+		BitrateKbps:    bitrateIn,
+		OfferedFormats: ingStats.OfferedFormats,
 		State:          prodState,
 		Track:          trackStr,
 		Artist:         ingStats.Metadata.Artist,
 		Title:          ingStats.Metadata.Title,
 		Album:          ingStats.Metadata.Album,
+		AlbumArtist:    ingStats.Metadata.AlbumArtist,
 		ChunksReceived: ingStats.ChunksReceived,
 		BytesReceived:  ingStats.BytesReceived,
 	})
 
 	// 2. Gather Consumer Info (SIP/RTP Egress)
+	allCodecs := []domain.Codec{cfg.Codec}
+	fallbackCodecs := []domain.Codec{domain.CodecG722, domain.CodecPCMU, domain.CodecPCMA, domain.CodecOpus}
+	for _, c := range fallbackCodecs {
+		if c != cfg.Codec {
+			allCodecs = append(allCodecs, c)
+		}
+	}
+	var offeredSIPCodecs []string
+	for _, c := range allCodecs {
+		offeredSIPCodecs = append(offeredSIPCodecs, fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(c)), c.PayloadType(), c.RTPClockRate()))
+	}
+
+	autoAnswerDesc := string(cfg.AutoAnswer)
+	if cfg.CustomAutoAnswerHeader != "" {
+		autoAnswerDesc = fmt.Sprintf("custom (%s)", cfg.CustomAutoAnswerHeader)
+	}
+
 	val, hasCall := s.activeCalls.Load(id)
 	if hasCall {
 		call := val.(*activeCallState)
@@ -666,6 +689,10 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		lingerActive := (call.lingerTimer != nil)
 		startTime := call.session.StartTime
 		answerTime := call.session.AnswerTime
+		callID := ""
+		if call.dialog != nil {
+			// Dialog wrapper call id
+		}
 		call.mu.Unlock()
 
 		var activeCodec domain.Codec = cfg.Codec
@@ -698,21 +725,33 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 			localRTPStr = fmt.Sprintf("0.0.0.0:%d", rtpStats.LocalPort)
 		}
 
+		bitrateOut := 64
+		if activeCodec == domain.CodecOpus {
+			bitrateOut = 96
+		}
+
 		info.Consumers = append(info.Consumers, ConsumerDebugInfo{
 			Type:           "SIP/RTP Egress",
 			URL:            cfg.SIPTarget,
+			CallID:         callID,
 			State:          sessionState,
 			ConfigCodec:    string(cfg.Codec),
 			ActiveCodec:    string(activeCodec),
-			Format:         fmt.Sprintf("%s (%s mode)", strings.ToUpper(string(activeCodec)), effectiveMode),
+			OfferedCodecs:  offeredSIPCodecs,
+			NegotiatedSDP:  fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(activeCodec)), activeCodec.PayloadType(), activeCodec.RTPClockRate()),
+			RTPClockRate:   activeCodec.RTPClockRate(),
+			PayloadType:    activeCodec.PayloadType(),
+			Format:         fmt.Sprintf("%s %dHz 1ch (%d kbps)", strings.ToUpper(string(activeCodec)), activeCodec.SampleRate(), bitrateOut),
 			LocalRTP:       localRTPStr,
 			RemoteRTP:      rtpStats.RemoteAddr,
+			AutoAnswer:     autoAnswerDesc,
 			BufferMode:     effectiveMode,
 			Priority:       priority,
 			BufferedChunks: bufferedCount,
 			LingerActive:   lingerActive,
 			PacketsSent:    rtpStats.PacketsSent,
 			BytesSent:      rtpStats.BytesSent,
+			BitrateKbps:    bitrateOut,
 			DurationSec:    durationSec,
 		})
 	} else {
@@ -720,15 +759,25 @@ func (s *BridgeService) buildStreamDebugInfo(p *domain.Player) StreamDebugInfo {
 		if bMode == "" {
 			bMode = s.config.DefaultBufferMode
 		}
+		bitrateOut := 64
+		if cfg.Codec == domain.CodecOpus {
+			bitrateOut = 96
+		}
 		info.Consumers = append(info.Consumers, ConsumerDebugInfo{
-			Type:        "SIP/RTP Egress",
-			URL:         cfg.SIPTarget,
-			State:       "idle",
-			ConfigCodec: string(cfg.Codec),
-			ActiveCodec: string(cfg.Codec),
-			Format:      fmt.Sprintf("%s (%s mode)", strings.ToUpper(string(cfg.Codec)), bMode),
-			BufferMode:  string(bMode),
-			Priority:    cfg.Priority,
+			Type:          "SIP/RTP Egress",
+			URL:           cfg.SIPTarget,
+			State:         "idle",
+			ConfigCodec:   string(cfg.Codec),
+			ActiveCodec:   string(cfg.Codec),
+			OfferedCodecs: offeredSIPCodecs,
+			NegotiatedSDP: fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(cfg.Codec)), cfg.Codec.PayloadType(), cfg.Codec.RTPClockRate()),
+			RTPClockRate:  cfg.Codec.RTPClockRate(),
+			PayloadType:   cfg.Codec.PayloadType(),
+			Format:        fmt.Sprintf("%s %dHz 1ch (%d kbps)", strings.ToUpper(string(cfg.Codec)), cfg.Codec.SampleRate(), bitrateOut),
+			AutoAnswer:    autoAnswerDesc,
+			BufferMode:    string(bMode),
+			Priority:      cfg.Priority,
+			BitrateKbps:   bitrateOut,
 		})
 	}
 

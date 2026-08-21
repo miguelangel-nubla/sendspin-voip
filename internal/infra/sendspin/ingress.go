@@ -3,6 +3,7 @@ package sendspin
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"log/slog"
 	"net"
 	"strconv"
@@ -30,15 +31,16 @@ type playerWorker struct {
 	cancel  context.CancelFunc
 	ctx     context.Context
 
-	statsMu        sync.RWMutex
-	connected      bool
-	currentCodec   string
-	currentRate    int
+	statsMu         sync.RWMutex
+	connected       bool
+	currentCodec    string
+	currentRate     int
 	currentChannels int
 	currentBitDepth int
-	currentMeta    domain.StreamMetadata
-	chunksReceived uint64
-	bytesReceived  uint64
+	offeredFormats  []string
+	currentMeta     domain.StreamMetadata
+	chunksReceived  uint64
+	bytesReceived   uint64
 }
 
 // Ingress implements app.PlayerIngressPort using Sendspin wire protocol.
@@ -314,12 +316,18 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 			continue
 		}
 
+		var offeredFormats []string
+		for _, f := range supportedFormats {
+			offeredFormats = append(offeredFormats, fmt.Sprintf("%s %dHz %dch %dbit", strings.ToUpper(f.Codec), f.SampleRate, f.Channels, f.BitDepth))
+		}
+
 		w.statsMu.Lock()
 		w.connected = true
 		w.currentCodec = "pcm"
 		w.currentRate = 48000
 		w.currentChannels = 2
 		w.currentBitDepth = 16
+		w.offeredFormats = offeredFormats
 		w.statsMu.Unlock()
 
 		w.client = client
@@ -541,6 +549,7 @@ func (ing *Ingress) GetPlayerStats(playerID string) (app.IngressPlayerStats, boo
 		SampleRate:     w.currentRate,
 		Channels:       w.currentChannels,
 		BitDepth:       w.currentBitDepth,
+		OfferedFormats: w.offeredFormats,
 		Metadata:       w.currentMeta,
 		ChunksReceived: w.chunksReceived,
 		BytesReceived:  w.bytesReceived,
