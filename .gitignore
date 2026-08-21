@@ -1,6 +1,18 @@
 bin/
 dist/
-config.yaml
+
+# Local runtime configuration at the repository root only.
+# NOTE: these patterns must stay anchored with a leading slash. An unanchored
+# "config.yaml" also matches sendspin-voip/config.yaml, which is the Home
+# Assistant add-on manifest and *must* be committed for the add-on repository
+# to be discoverable in the Add-on Store.
+/config.yaml
+/config.yml
+
+# Persisted runtime player state (volume/mute), written next to the binary.
+/sendspin-voip-state.json
+*-state.json
+
 *.local.yaml
 .DS_Store
 *.log

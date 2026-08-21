@@ -1,0 +1,87 @@
+name: "Sendspin VoIP Bridge"
+slug: "sendspin_voip"
+version: "1.0.0"
+description: "Bridge Music Assistant to SIP/VoIP phones for announcements and synchronized music."
+url: "https://github.com/miguelangel-nubla/sendspin-voip"
+image: "ghcr.io/miguelangel-nubla/sendspin-voip-{arch}"
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+startup: application
+boot: auto
+host_network: true
+
+options:
+  log_level: "info"
+  http:
+    listen: ":8080"
+    api_token: ""
+    enable_pprof: false
+  sip:
+    mode: "pbx"
+    server: "192.168.1.50:5060"
+    username: "sendspin"
+    password: "secret_password"
+    domain: "192.168.1.50"
+    transport: "udp"
+    auto_answer_preset: "default"
+  sendspin:
+    server: "auto"
+    buffer_ms: 500
+  bridge:
+    default_buffer_mode: "announcement"
+    pickup_buffer_ms: 2000
+    drain_delay_ms: 500
+    idle_hangup_delay_ms: 5000
+    target_conflict_policy: "preempt_for_announcements"
+  players:
+    - id: "office_phone"
+      name: "Office Desk Phone"
+      sip_target: "sip:101@192.168.1.50"
+      codec: "auto"
+      buffer_mode: "announcement"
+      auto_answer: "default"
+      priority: 10
+      default_volume: 100
+
+schema:
+  log_level: list(debug|info|warn|error)?
+  http:
+    listen: str?
+    api_token: password?
+    enable_pprof: bool?
+  sip:
+    mode: list(pbx|direct)?
+    server: str?
+    username: str?
+    password: password?
+    domain: str?
+    transport: list(udp|tcp)?
+    local_ip: str?
+    local_sip_port: int?
+    rtp_port_min: int?
+    rtp_port_max: int?
+    auto_answer_preset: list(default|intercom|yealink|grandstream|snom|call_info|p_auto|none|custom)?
+    custom_auto_answer_header: str?
+  sendspin:
+    server: str?
+    buffer_ms: int?
+  bridge:
+    default_buffer_mode: list(announcement|live)?
+    pickup_buffer_ms: int?
+    drain_delay_ms: int?
+    idle_hangup_delay_ms: int?
+    target_conflict_policy: list(preempt_for_announcements|preempt_always|busy)?
+  players:
+    - id: str
+      name: str
+      sip_target: str
+      codec: list(auto|opus|l16|g722|pcmu|pcma)?
+      buffer_mode: list(announcement|live)?
+      auto_answer: list(default|intercom|yealink|grandstream|snom|call_info|p_auto|none|custom)?
+      custom_auto_answer_header: str?
+      priority: int?
+      default_volume: int?
