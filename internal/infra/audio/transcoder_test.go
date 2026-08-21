@@ -156,3 +156,38 @@ func TestTranscoder_OpusDecodeThenVolumeEncode(t *testing.T) {
 		t.Fatal("expected re-encoded packet")
 	}
 }
+
+// TestApplyVolume_DoesNotMutateInput pins that gain and mute never write
+// through the caller's slice. DownmixToMono returns its argument unchanged for
+// mono input, so the previous in-place zeroing on mute clobbered the caller's
+// PCM frame rather than producing a separate silent one.
+func TestApplyVolume_DoesNotMutateInput(t *testing.T) {
+	tr := NewTranscoder()
+
+	for _, volume := range []int{0, 50} {
+		input := []int32{100, -200, 300, -400}
+		original := append([]int32(nil), input...)
+
+		out := tr.ApplyVolume(input, volume)
+
+		for i := range input {
+			if input[i] != original[i] {
+				t.Fatalf("volume %d mutated the input slice at %d: got %d, want %d",
+					volume, i, input[i], original[i])
+			}
+		}
+		if len(out) != len(input) {
+			t.Errorf("volume %d: expected %d output samples, got %d", volume, len(input), len(out))
+		}
+	}
+}
+
+func TestApplyVolume_MuteProducesSilence(t *testing.T) {
+	tr := NewTranscoder()
+	out := tr.ApplyVolume([]int32{1000, -1000, 32767}, 0)
+	for i, v := range out {
+		if v != 0 {
+			t.Errorf("expected silence at %d, got %d", i, v)
+		}
+	}
+}

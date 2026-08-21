@@ -293,15 +293,17 @@ func (t *Transcoder) DownmixToMono(samples []int32, channels int) []int32 {
 // A linear 50% amplitude cut is only −6 dB, which sounds nearly as loud as full
 // scale. We map the slider onto a −60 dB … 0 dB fader instead (common for media
 // players), so 50% ≈ −30 dB (~1/32 amplitude) and reads as clearly quieter.
+//
+// The returned slice is always safe for the caller to keep: this never writes
+// through the input. That matters for mute, which used to zero in place —
+// DownmixToMono returns its argument unchanged for mono input, so muting a
+// mono stream overwrote the caller's own PCM frame.
 func (t *Transcoder) ApplyVolume(samples []int32, volumePercent int) []int32 {
 	if volumePercent >= 100 {
 		return samples
 	}
 	if volumePercent <= 0 {
-		for i := range samples {
-			samples[i] = 0
-		}
-		return samples
+		return make([]int32, len(samples))
 	}
 
 	const minDB = -60.0
