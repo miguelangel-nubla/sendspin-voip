@@ -56,6 +56,9 @@ func NewCaller(logger *slog.Logger, cfg CallerConfig) (*Caller, error) {
 	if cfg.Transport == "" {
 		cfg.Transport = "udp"
 	}
+	if cfg.Username == "" {
+		cfg.Username = "sendspin"
+	}
 
 	localIP := cfg.LocalIP
 	if localIP == "" {
@@ -105,9 +108,6 @@ func (c *Caller) Start(ctx context.Context) error {
 			Host: c.localIP,
 			Port: c.config.LocalSIPPort,
 		},
-	}
-	if contactHDR.Address.User == "" {
-		contactHDR.Address.User = "sendspin"
 	}
 
 	c.dialogCache = sipgo.NewDialogClientCache(client, contactHDR)
@@ -193,9 +193,7 @@ func (c *Caller) register(ctx context.Context) error {
 	if domainHost == "" {
 		domainHost = c.config.Server
 	}
-	if !strings.HasPrefix(domainHost, "sip:") {
-		domainHost = "sip:" + domainHost
-	}
+	domainHost = domain.NormalizeSIPTarget(domainHost)
 
 	var recipientURI sip.Uri
 	if err := sip.ParseUri(domainHost, &recipientURI); err != nil {
@@ -301,10 +299,7 @@ func (c *Caller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Co
 	}
 
 	var recipientURI sip.Uri
-	targetStr := targetURI
-	if !strings.HasPrefix(targetStr, "sip:") && !strings.HasPrefix(targetStr, "sips:") {
-		targetStr = "sip:" + targetStr
-	}
+	targetStr := domain.NormalizeSIPTarget(targetURI)
 
 	if err := sip.ParseUri(targetStr, &recipientURI); err != nil {
 		return nil, fmt.Errorf("invalid target URI %q: %w", targetURI, err)
@@ -314,9 +309,6 @@ func (c *Caller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Co
 		User: c.config.Username,
 		Host: c.localIP,
 		Port: c.config.LocalSIPPort,
-	}
-	if fromURI.User == "" {
-		fromURI.User = "sendspin"
 	}
 
 	req := sip.NewRequest(sip.OPTIONS, recipientURI)
@@ -377,10 +369,7 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 	}
 
 	var recipientURI sip.Uri
-	targetStr := player.SIPTarget
-	if !strings.HasPrefix(targetStr, "sip:") && !strings.HasPrefix(targetStr, "sips:") {
-		targetStr = "sip:" + targetStr
-	}
+	targetStr := domain.NormalizeSIPTarget(player.SIPTarget)
 
 	if err := sip.ParseUri(targetStr, &recipientURI); err != nil {
 		return nil, fmt.Errorf("invalid sip target URI %q: %w", player.SIPTarget, err)
@@ -405,9 +394,6 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 	headers = append(headers, sip.NewHeader("Content-Type", "application/sdp"))
 
 	fromUser := c.config.Username
-	if fromUser == "" {
-		fromUser = "sendspin"
-	}
 	fromDomain := c.config.Domain
 	if fromDomain == "" {
 		fromDomain = c.config.Server

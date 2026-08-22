@@ -316,8 +316,10 @@ func (c *AppConfig) ToDomainPlayerConfigs() ([]domain.PlayerConfig, error) {
 		}
 
 		vol := p.DefaultVolume
-		if vol <= 0 || vol > 100 {
+		if vol <= 0 {
 			vol = 100
+		} else {
+			vol = domain.ClampVolume(vol)
 		}
 
 		name := p.Name
@@ -325,15 +327,13 @@ func (c *AppConfig) ToDomainPlayerConfigs() ([]domain.PlayerConfig, error) {
 			name = p.ID
 		}
 
-		customHeader := p.CustomAutoAnswerHeader
-
 		result[i] = domain.PlayerConfig{
 			ID:                     p.ID,
 			Name:                   name,
 			SIPTarget:              p.SIPTarget,
 			Codec:                  codec,
 			AutoAnswer:             autoAnswer,
-			CustomAutoAnswerHeader: customHeader,
+			CustomAutoAnswerHeader: p.CustomAutoAnswerHeader,
 			Priority:               p.Priority,
 			DefaultVolume:          vol,
 		}
