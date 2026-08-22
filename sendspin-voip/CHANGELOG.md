@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+- Explicit network destination routing for PBX servers when SIP server hostname/IP differs from the realm domain.
+- Support shorthand SIP target extension numbers (e.g. `8003` or `sip:8003`) with automatic PBX domain qualification.
+- Simplified `config.example.yaml` with commented-out optional settings and complete Configuration Reference table in docs.
+
 ## 1.0.0
 
 - Initial release of Sendspin VoIP Bridge for Home Assistant.
