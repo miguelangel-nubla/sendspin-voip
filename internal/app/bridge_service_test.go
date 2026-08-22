@@ -884,3 +884,47 @@ func TestBridgeService_PauseImmediatelyStopsAudio(t *testing.T) {
 
 	bridge.Shutdown()
 }
+
+func TestBridgeService_TerminateCallState_IdentityCheck(t *testing.T) {
+	sipCaller := &mockSIPCaller{}
+	rtpStreamer := &mockRTPStreamer{}
+	ingress := &mockIngress{}
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
+
+	bridge := NewBridgeService(
+		nil,
+		BridgeConfig{
+			DrainDelayMs:   50,
+			ConflictPolicy: domain.ConflictPolicyPreemptHigher,
+		},
+		arbiter,
+		sipCaller,
+		rtpStreamer,
+		ingress,
+		nil,
+	)
+
+	call1 := &activeCallState{
+		session: domain.NewCallSession("sess-1", "player-1", "sip:101@192.168.1.50", 0, domain.StreamMetadata{}),
+	}
+	call2 := &activeCallState{
+		session: domain.NewCallSession("sess-2", "player-1", "sip:101@192.168.1.50", 0, domain.StreamMetadata{}),
+	}
+
+	// Active calls currently holds call2
+	bridge.activeCalls.Store("player-1", call2)
+
+	// An old routine for call1 finishes and calls terminateCallState
+	bridge.terminateCallState(call1, false, 0, 100*time.Millisecond, false)
+
+	// player-1 in activeCalls must still be call2!
+	val, ok := bridge.activeCalls.Load("player-1")
+	if !ok {
+		t.Fatal("expected player-1 to remain in activeCalls")
+	}
+	if val.(*activeCallState) != call2 {
+		t.Fatal("expected active call to still be call2, but it was overwritten or deleted")
+	}
+
+	bridge.Shutdown()
+}

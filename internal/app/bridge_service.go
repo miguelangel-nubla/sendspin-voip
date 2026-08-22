@@ -170,9 +170,18 @@ func (s *BridgeService) RegisterPlayers(configs []domain.PlayerConfig) error {
 	}
 	s.playersMu.Unlock()
 
-	// Perform initial probe & publish synchronously so players are available immediately
+	// Perform initial probe & publish concurrently so players are available immediately
+	var initialProbeWG sync.WaitGroup
 	for _, cfg := range configs {
-		s.probeAndSyncPlayer(cfg)
+		initialProbeWG.Add(1)
+		go func(c domain.PlayerConfig) {
+			defer initialProbeWG.Done()
+			s.probeAndSyncPlayer(c)
+		}(cfg)
+	}
+	initialProbeWG.Wait()
+
+	for _, cfg := range configs {
 		s.discoveryWG.Add(1)
 		go s.runPlayerDiscoveryLoop(cfg)
 	}
@@ -243,6 +252,10 @@ func (s *BridgeService) probeAndSyncPlayer(cfg domain.PlayerConfig) {
 
 // OnStreamStart handles stream initiation from Music Assistant.
 func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadata) {
+	if s.ctx.Err() != nil {
+		return
+	}
+
 	s.playersMu.Lock()
 	player, exists := s.players[playerID]
 	if !exists {
@@ -294,6 +307,7 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		playerCfg.Priority,
 		meta,
 	)
+	session.SetState(domain.StateDialing)
 
 	s.logger.Info("Stream started on player",
 		"player_id", playerID,
@@ -314,6 +328,14 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		return
 	}
 
+	// 3. Allocate local RTP socket before tearing down any preempted call
+	rtpSess, err := s.rtpStreamer.CreateSession(playerCfg.Codec)
+	if err != nil {
+		s.logger.Error("Failed to create RTP session", "err", err)
+		s.arbiter.ReleaseTarget(session)
+		return
+	}
+
 	if preempted != nil {
 		s.logger.Info("Preempting active session on target",
 			"preempted_player", preempted.PlayerID,
@@ -324,14 +346,6 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		s.ingress.SendStopToUpstream(preempted.PlayerID)
 		// Synchronously terminate the preempted call to prevent INVITE collision / 486 Busy
 		s.terminatePlayerCallSync(preempted.PlayerID, false, 500*time.Millisecond)
-	}
-
-	// 3. Allocate local RTP socket
-	rtpSess, err := s.rtpStreamer.CreateSession(playerCfg.Codec)
-	if err != nil {
-		s.logger.Error("Failed to create RTP session", "err", err)
-		s.arbiter.ReleaseTarget(session)
-		return
 	}
 
 	rtpSess.SetVolume(s.getEffectiveVolume(playerID))
@@ -369,7 +383,7 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 	dialog, err := s.sipCaller.Dial(dialCtx, cfg, call.rtpSession.LocalPort())
 	if err != nil {
 		s.logger.Error("SIP call failed", "player_id", cfg.ID, "target", cfg.SIPTarget, "err", err)
-		s.terminatePlayerCall(cfg.ID, true)
+		s.terminateCallState(call, true, s.config.DrainDelay(), shutdownByeTimeout, true)
 		return
 	}
 
@@ -461,49 +475,38 @@ func (s *BridgeService) handleDTMF(playerID, digit string) {
 		// Next track
 		s.ingress.SendNextToUpstream(playerID)
 	case "0":
-		// Toggle mute
-		s.playersMu.Lock()
-		player, ok := s.players[playerID]
+		// Toggle mute and persist state
 		var newMuted bool
-		if ok {
-			player.IsMuted = !player.IsMuted
-			newMuted = player.IsMuted
-		}
-		s.playersMu.Unlock()
-		if ok {
-			s.ingress.SendMuteToUpstream(playerID, newMuted)
-		}
+		s.updatePlayerState(playerID, func(p *domain.Player) {
+			p.IsMuted = !p.IsMuted
+			newMuted = p.IsMuted
+		})
+		s.ingress.SendMuteToUpstream(playerID, newMuted)
 	case "1", "2", "3", "4", "5", "6", "7", "8":
 		// Direct volume presets: 1=10%, ..., 8=80%
 		vol := int(digit[0]-'0') * 10
+		s.OnVolumeChange(playerID, vol)
 		s.ingress.SendVolumeToUpstream(playerID, vol)
 	case "9":
 		// '9' sets maximum volume (100%)
+		s.OnVolumeChange(playerID, 100)
 		s.ingress.SendVolumeToUpstream(playerID, 100)
 	case "A", "C":
 		// Volume Up (+10%)
-		s.playersMu.Lock()
-		player, ok := s.players[playerID]
-		newVol := 100
-		if ok {
-			newVol = min(100, player.Volume+10)
-		}
-		s.playersMu.Unlock()
-		if ok {
-			s.ingress.SendVolumeToUpstream(playerID, newVol)
-		}
+		var newVol int
+		s.updatePlayerState(playerID, func(p *domain.Player) {
+			p.SetVolume(p.Volume + 10)
+			newVol = p.Volume
+		})
+		s.ingress.SendVolumeToUpstream(playerID, newVol)
 	case "B", "D":
 		// Volume Down (-10%)
-		s.playersMu.Lock()
-		player, ok := s.players[playerID]
-		newVol := 0
-		if ok {
-			newVol = max(0, player.Volume-10)
-		}
-		s.playersMu.Unlock()
-		if ok {
-			s.ingress.SendVolumeToUpstream(playerID, newVol)
-		}
+		var newVol int
+		s.updatePlayerState(playerID, func(p *domain.Player) {
+			p.SetVolume(p.Volume - 10)
+			newVol = p.Volume
+		})
+		s.ingress.SendVolumeToUpstream(playerID, newVol)
 	}
 }
 
@@ -648,7 +651,7 @@ func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 		call.mu.Unlock()
 
 		s.logger.Info("Idle linger timeout expired, terminating SIP call", "player_id", playerID)
-		s.terminatePlayerCall(playerID, true)
+		s.terminateCallState(call, true, s.config.DrainDelay(), shutdownByeTimeout, true)
 	})
 	call.mu.Unlock()
 }
@@ -718,11 +721,19 @@ func (s *BridgeService) OnGroupUpdate(playerID string, isGrouped bool) {
 }
 
 func (s *BridgeService) terminateCall(playerID string, releaseArbiter bool, drainDelay, byeTimeout time.Duration, async bool) {
-	val, ok := s.activeCalls.LoadAndDelete(playerID)
+	val, ok := s.activeCalls.Load(playerID)
 	if !ok {
 		return
 	}
-	call := val.(*activeCallState)
+	s.terminateCallState(val.(*activeCallState), releaseArbiter, drainDelay, byeTimeout, async)
+}
+
+func (s *BridgeService) terminateCallState(call *activeCallState, releaseArbiter bool, drainDelay, byeTimeout time.Duration, async bool) {
+	if call == nil {
+		return
+	}
+	playerID := call.session.PlayerID
+	s.activeCalls.CompareAndDelete(playerID, call)
 
 	call.cancelLinger()
 	call.session.Close()

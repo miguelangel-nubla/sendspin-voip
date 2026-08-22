@@ -224,6 +224,13 @@ func (c *AppConfig) Validate() error {
 		c.StateFile = DefaultStateFilePath()
 	}
 
+	c.SIP.Mode = strings.ToLower(strings.TrimSpace(cmp.Or(c.SIP.Mode, "pbx")))
+	switch c.SIP.Mode {
+	case "pbx", "direct":
+	default:
+		return fmt.Errorf("invalid sip.mode %q (allowed: pbx, direct)", c.SIP.Mode)
+	}
+
 	c.SIP.Transport = cmp.Or(c.SIP.Transport, "udp")
 	switch strings.ToLower(strings.TrimSpace(c.SIP.Transport)) {
 	case "udp", "tcp":

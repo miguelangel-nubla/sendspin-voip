@@ -42,10 +42,6 @@ type AudioPath struct {
 	pcmPlayAt          time.Time
 	pcmAccumulatedTime time.Duration
 	chunksPendingCount int
-	ingressRawCodec    string
-	ingressRawRate     int
-	ingressRawChannels int
-	ingressRawBitDepth int
 
 	// Converted 20ms ready frames buffer
 	ready []ReadyFrame
@@ -162,6 +158,7 @@ func (a *AudioPath) Fill(maxReadyFrames int) error {
 		a.chunksPendingCount++
 		if err := a.processChunkLocked(chunk); err != nil {
 			a.chunksPendingCount--
+			a.upstream.AdvanceRead()
 			return err
 		}
 		a.upstream.AdvanceRead()
@@ -179,11 +176,6 @@ func (a *AudioPath) processChunkLocked(chunk domain.AudioChunk) error {
 	inRate := cmp.Or(chunk.SampleRate, 48000)
 	inChannels := domain.NormalizeChannels(chunk.Channels, 2)
 	inBitDepth := cmp.Or(chunk.BitDepth, 16)
-
-	a.ingressRawCodec = inCodec
-	a.ingressRawRate = inRate
-	a.ingressRawChannels = inChannels
-	a.ingressRawBitDepth = inBitDepth
 
 	// 1. Opus Passthrough path: when input has OpusData, target codec is Opus, and volume is 100% (0 dB)
 	if len(chunk.OpusData) > 0 && a.codec == domain.CodecOpus && a.volume >= 100 {
@@ -278,7 +270,23 @@ func (a *AudioPath) processChunkLocked(chunk domain.AudioChunk) error {
 			outCh = 2
 		}
 
-		a.appendTranscodedFrameLocked(encoded, framePlayAt, frameTimestampUs, outCh)
+		consumed := 0
+		if len(a.pcmBuffer) < samplesPer20ms {
+			consumed = a.chunksPendingCount
+			a.chunksPendingCount = 0
+		}
+
+		a.ready = append(a.ready, ReadyFrame{
+			Payload:        encoded,
+			PlayAt:         framePlayAt,
+			TimestampUs:    frameTimestampUs,
+			Passthrough:    false,
+			Codec:          a.codec,
+			SampleRate:     a.codec.SampleRate(),
+			Channels:       outCh,
+			ChunksConsumed: consumed,
+		})
+		a.transcodePackets++
 	}
 
 	if len(a.pcmBuffer) == 0 {

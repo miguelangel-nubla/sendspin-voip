@@ -687,19 +687,20 @@
     }
 
     function createCardHTML(id, st) {
+      const safeId = escapeHTML(id);
       return `
-      <div class="stream-card" id="card-${id}">
+      <div class="stream-card" id="card-${safeId}">
         <div class="stream-header">
           <div class="player-title-row">
-            <span class="player-name" id="name-${id}">${escapeHTML(st.name || id)}</span>
-            <span class="player-target" id="target-${id}">...</span>
-            <span class="pill-tag tag-idle" id="badge-${id}">IDLE</span>
-            <span id="group-badge-${id}"></span>
+            <span class="player-name" id="name-${safeId}">${escapeHTML(st.name || id)}</span>
+            <span class="player-target" id="target-${safeId}">...</span>
+            <span class="pill-tag tag-idle" id="badge-${safeId}">IDLE</span>
+            <span id="group-badge-${safeId}"></span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
-            <span class="timecode-pill" id="tc-${id}">00:00</span>
-            <span class="pill-tag tag-idle" id="vol-${id}">100% (0 dB)</span>
-            <button class="btn" onclick="inspectStreamJson('${id}')">JSON</button>
+            <span class="timecode-pill" id="tc-${safeId}">00:00</span>
+            <span class="pill-tag tag-idle" id="vol-${safeId}">100% (0 dB)</span>
+            <button class="btn" data-stream-id="${safeId}" onclick="inspectStreamJson(this.getAttribute('data-stream-id'))">JSON</button>
           </div>
         </div>
 

@@ -159,3 +159,20 @@ func TestToDomainPlayerConfigs_DefaultVolumeZero(t *testing.T) {
 		t.Errorf("expected p2 default volume 100, got %d", domainPlayers[1].DefaultVolume)
 	}
 }
+
+func TestValidate_SIPMode(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Players = []PlayerConfig{{ID: "p1", SIPTarget: "sip:101@192.168.1.50"}}
+	cfg.SIP.Mode = "PBX"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid uppercase PBX mode, got %v", err)
+	}
+	if cfg.SIP.Mode != "pbx" {
+		t.Errorf("expected normalized mode 'pbx', got %q", cfg.SIP.Mode)
+	}
+
+	cfg.SIP.Mode = "invalid-mode"
+	if err := cfg.Validate(); err == nil {
+		t.Errorf("expected error for invalid sip.mode, got nil")
+	}
+}

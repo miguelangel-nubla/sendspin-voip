@@ -314,3 +314,36 @@ func TestUpstreamPlayer_SeekDiscontinuityDetection(t *testing.T) {
 		t.Fatal("expected discontinuity detected on 10s backward seek")
 	}
 }
+
+// TestAudioPath_CorruptedChunk_AdvancesAndRecovers verifies that an un-decodable audio chunk
+// is skipped on error so subsequent valid chunks continue to play without stalling the stream.
+func TestAudioPath_CorruptedChunk_AdvancesAndRecovers(t *testing.T) {
+	transcoder := audio.NewTranscoder()
+	audioPath := NewAudioPath(transcoder, domain.CodecPCMU, 100)
+
+	// 1. Push a corrupt Opus chunk
+	corruptChunk := domain.AudioChunk{
+		OpusData:   []byte{0xFF, 0xFF}, // invalid Opus payload
+		SampleRate: 48000,
+		Channels:   2,
+	}
+	_ = audioPath.Push(corruptChunk)
+
+	// 2. Push a valid PCM chunk
+	validChunk := domain.AudioChunk{
+		Samples:    make([]int32, 1920),
+		SampleRate: 48000,
+		Channels:   2,
+	}
+	_ = audioPath.Push(validChunk)
+
+	// 3. Fill() will encounter the corrupt chunk and return an error, but advance past it
+	_ = audioPath.Fill(10)
+
+	// 4. Subsequent Fill() must successfully transcode the valid chunk
+	_ = audioPath.Fill(10)
+
+	if audioPath.ReadyLen() == 0 {
+		t.Fatal("expected ready frames from valid chunk after corrupted chunk was dropped")
+	}
+}

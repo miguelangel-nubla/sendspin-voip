@@ -53,44 +53,39 @@ func (p *PortPool) Allocate() (*net.UDPConn, int, error) {
 	totalPorts := ((p.maxPort - p.minPort) / 2) + 1
 	now := time.Now()
 
-	// Pass 1: Prefer ports not currently allocated and outside of cooldown
-	for i := 0; i < totalPorts; i++ {
-		port := p.nextPort
-		p.advanceNextPort()
+	tryPass := func(ignoreCooldown bool) (*net.UDPConn, int, bool) {
+		for i := 0; i < totalPorts; i++ {
+			port := p.nextPort
+			p.advanceNextPort()
 
-		if p.allocated[port] {
-			continue
-		}
-
-		if relTime, ok := p.releasedAt[port]; ok {
-			if now.Sub(relTime) < p.cooldown {
+			if p.allocated[port] {
 				continue
 			}
-		}
 
-		conn, err := bindUDPPort(port)
-		if err == nil {
-			p.allocated[port] = true
-			delete(p.releasedAt, port)
-			return conn, port, nil
+			if !ignoreCooldown {
+				if relTime, ok := p.releasedAt[port]; ok && now.Sub(relTime) < p.cooldown {
+					continue
+				}
+			}
+
+			conn, err := bindUDPPort(port)
+			if err == nil {
+				p.allocated[port] = true
+				delete(p.releasedAt, port)
+				return conn, port, true
+			}
 		}
+		return nil, 0, false
+	}
+
+	// Pass 1: Prefer ports not currently allocated and outside of cooldown
+	if conn, port, ok := tryPass(false); ok {
+		return conn, port, nil
 	}
 
 	// Pass 2: Fallback to unallocated ports even if still within cooldown
-	for i := 0; i < totalPorts; i++ {
-		port := p.nextPort
-		p.advanceNextPort()
-
-		if p.allocated[port] {
-			continue
-		}
-
-		conn, err := bindUDPPort(port)
-		if err == nil {
-			p.allocated[port] = true
-			delete(p.releasedAt, port)
-			return conn, port, nil
-		}
+	if conn, port, ok := tryPass(true); ok {
+		return conn, port, nil
 	}
 
 	return nil, 0, fmt.Errorf("no available RTP UDP ports in range [%d, %d]", p.minPort, p.maxPort)

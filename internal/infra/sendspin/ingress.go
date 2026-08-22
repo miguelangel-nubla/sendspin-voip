@@ -303,7 +303,7 @@ func (ing *Ingress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs 
 	if existing, ok := ing.workers[player.ID]; ok {
 		existing.statsMu.RLock()
 		existingClient := existing.state.client
-		if existing.state.volume > 0 {
+		if existing.state.volume >= 0 && existing.state.volume <= 100 {
 			initialVol = existing.state.volume
 		}
 		initialMuted = existing.state.isMuted
@@ -320,7 +320,7 @@ func (ing *Ingress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs 
 		delete(ing.workers, player.ID)
 	}
 
-	if initialVol <= 0 || initialVol > 100 {
+	if initialVol < 0 || initialVol > 100 {
 		initialVol = 100
 	}
 

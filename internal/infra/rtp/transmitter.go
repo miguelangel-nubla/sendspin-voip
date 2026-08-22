@@ -379,34 +379,41 @@ func (t *Transmitter) step() {
 	_ = t.sendPacket(silencePayload, codec.PayloadType(), samplesPerPacket, false)
 }
 
-// generateComfortNoise returns an RFC-compliant silence / comfort noise frame for the codec.
-func generateComfortNoise(codec domain.Codec) []byte {
-	switch codec {
-	case domain.CodecOpus:
-		// Opus 20ms DTX / comfort noise payload
-		return []byte{0xF8, 0xFF, 0xFE}
-	case domain.CodecPCMU:
-		// PCMU (mu-law) silence is 0xFF
+var (
+	silenceOpus = []byte{0xF8, 0xFF, 0xFE}
+	silenceG722 = make([]byte, 160)
+	silencePCMU = func() []byte {
 		buf := make([]byte, 160)
 		for i := range buf {
 			buf[i] = 0xFF
 		}
 		return buf
-	case domain.CodecPCMA:
-		// PCMA (A-law) silence is 0xD5
+	}()
+	silencePCMA = func() []byte {
 		buf := make([]byte, 160)
 		for i := range buf {
 			buf[i] = 0xD5
 		}
 		return buf
+	}()
+	silenceL16 = make([]byte, 1920)
+)
+
+// generateComfortNoise returns an RFC-compliant silence / comfort noise frame for the codec.
+func generateComfortNoise(codec domain.Codec) []byte {
+	switch codec {
+	case domain.CodecOpus:
+		return silenceOpus
+	case domain.CodecPCMU:
+		return silencePCMU
+	case domain.CodecPCMA:
+		return silencePCMA
 	case domain.CodecG722:
-		// G.722 16kHz mono (20ms = 160 bytes)
-		return make([]byte, 160)
+		return silenceG722
 	case domain.CodecL16:
-		// L16 48kHz mono (20ms = 960 samples * 2 bytes = 1920 bytes)
-		return make([]byte, 1920)
+		return silenceL16
 	default:
-		return make([]byte, 160)
+		return silenceG722
 	}
 }
 

@@ -607,15 +607,15 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 	}
 
 	if callID != "" {
-		c.mu.Lock()
-		c.activeDialogs[callID] = dialog
-		c.mu.Unlock()
-
 		dialog.onBye = func() {
 			c.mu.Lock()
 			delete(c.activeDialogs, callID)
 			c.mu.Unlock()
 		}
+
+		c.mu.Lock()
+		c.activeDialogs[callID] = dialog
+		c.mu.Unlock()
 	}
 
 	return dialog, nil
@@ -746,8 +746,11 @@ func (d *DialogWrapper) notifyDone() {
 	d.once.Do(func() {
 		close(d.doneChan)
 	})
-	if d.onBye != nil {
-		d.onBye()
+	d.mu.RLock()
+	onBye := d.onBye
+	d.mu.RUnlock()
+	if onBye != nil {
+		onBye()
 	}
 }
 

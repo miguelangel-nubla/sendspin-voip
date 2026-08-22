@@ -276,6 +276,41 @@ func TestIngress_MockSendspinServer(t *testing.T) {
 	}
 }
 
+func TestIngress_RegisterPlayerWithCodecs_PreservesZeroVolume(t *testing.T) {
+	ing := NewIngress(nil, IngressConfig{
+		Server:   "127.0.0.1:9999",
+		BufferMs: 100,
+	})
+	defer func() { _ = ing.StopAll() }()
+
+	player := domain.PlayerConfig{
+		ID:            "zero-vol-player",
+		Name:          "Zero Vol Player",
+		SIPTarget:     "sip:200@127.0.0.1",
+		Codec:         domain.CodecOpus,
+		DefaultVolume: 0,
+	}
+
+	handler := &dummyEventHandler{}
+	_ = ing.RegisterPlayerWithCodecs(player, []domain.Codec{domain.CodecOpus}, handler)
+
+	ing.mu.Lock()
+	worker, ok := ing.workers["zero-vol-player"]
+	ing.mu.Unlock()
+
+	if !ok {
+		t.Fatalf("expected worker to be registered")
+	}
+
+	worker.statsMu.RLock()
+	vol := worker.state.volume
+	worker.statsMu.RUnlock()
+
+	if vol != 0 {
+		t.Errorf("expected worker volume to be 0, got %d", vol)
+	}
+}
+
 
 
 
