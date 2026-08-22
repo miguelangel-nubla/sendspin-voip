@@ -236,14 +236,9 @@ func (c *Caller) register(ctx context.Context) error {
 		return err
 	}
 
-	if (res.StatusCode == 401 || res.StatusCode == 407) && c.config.Password != "" {
-		res, err = c.client.DoDigestAuth(ctx, req, res, sipgo.DigestAuth{
-			Username: c.config.Username,
-			Password: c.config.Password,
-		})
-		if err != nil {
-			return fmt.Errorf("SIP PBX digest auth failed: %w", err)
-		}
+	res, err = c.handleDigestAuth(ctx, c.client, req, res)
+	if err != nil {
+		return fmt.Errorf("SIP PBX digest auth failed: %w", err)
 	}
 
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
@@ -260,6 +255,16 @@ func (c *Caller) register(ctx context.Context) error {
 	c.mu.Unlock()
 
 	return fmt.Errorf("SIP PBX registration rejected with status %d %s", res.StatusCode, res.Reason)
+}
+
+func (c *Caller) handleDigestAuth(ctx context.Context, client *sipgo.Client, req *sip.Request, res *sip.Response) (*sip.Response, error) {
+	if (res.StatusCode == 401 || res.StatusCode == 407) && c.config.Password != "" {
+		return client.DoDigestAuth(ctx, req, res, sipgo.DigestAuth{
+			Username: c.config.Username,
+			Password: c.config.Password,
+		})
+	}
+	return res, nil
 }
 
 // RegistrationStatus returns current SIP registration and connectivity info.
@@ -342,15 +347,9 @@ func (c *Caller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Co
 		return nil, fmt.Errorf("OPTIONS request failed: %w", err)
 	}
 
-	// Handle PBX Digest Authentication challenge if required
-	if (res.StatusCode == 401 || res.StatusCode == 407) && c.config.Password != "" {
-		res, err = client.DoDigestAuth(ctx, req, res, sipgo.DigestAuth{
-			Username: c.config.Username,
-			Password: c.config.Password,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("OPTIONS digest auth failed: %w", err)
-		}
+	res, err = c.handleDigestAuth(ctx, client, req, res)
+	if err != nil {
+		return nil, fmt.Errorf("OPTIONS digest auth failed: %w", err)
 	}
 
 	// 486 Busy Here still proves the endpoint is reachable, so treat it as a

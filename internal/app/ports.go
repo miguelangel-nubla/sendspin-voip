@@ -93,16 +93,7 @@ func (s IngressPlayerStats) FormatDescription() string {
 	if codec == "" {
 		codec = "opus"
 	}
-	rate := s.SampleRate
-	if rate <= 0 {
-		rate = 48000
-	}
-	channels := domain.NormalizeChannels(s.Channels, 2)
-	bitDepth := s.BitDepth
-	if bitDepth <= 0 {
-		bitDepth = 16
-	}
-	return domain.FormatAudioDescription(codec, rate, channels, bitDepth)
+	return domain.FormatAudioDescription(codec, s.SampleRate, s.Channels, s.BitDepth)
 }
 
 // BitrateKbps calculates the bitrate in kbps for the ingress format.
@@ -111,16 +102,7 @@ func (s IngressPlayerStats) BitrateKbps() int {
 	if codec == "" {
 		codec = "opus"
 	}
-	rate := s.SampleRate
-	if rate <= 0 {
-		rate = 48000
-	}
-	channels := domain.NormalizeChannels(s.Channels, 2)
-	bitDepth := s.BitDepth
-	if bitDepth <= 0 {
-		bitDepth = 16
-	}
-	return domain.CalculateBitrateKbps(codec, rate, channels, bitDepth)
+	return domain.CalculateBitrateKbps(codec, s.SampleRate, s.Channels, s.BitDepth)
 }
 
 // WebSocketURL returns the normalized WebSocket endpoint URI for the ingress server.

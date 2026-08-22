@@ -304,6 +304,16 @@ func codecsEqual(a, b []domain.Codec) bool {
 	return true
 }
 
+func drainChannel[T any](ch <-chan T) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
 // BuildSupportedFormatsForCodecs generates the exact ordered AudioFormat capability list based on discovered SIP codecs.
 func BuildSupportedFormatsForCodecs(codecs []domain.Codec, preferred domain.Codec) ([]protocol.AudioFormat, []string, []int, []int) {
 	var formats []protocol.AudioFormat
@@ -338,47 +348,26 @@ func BuildSupportedFormatsForCodecs(codecs []domain.Codec, preferred domain.Code
 
 	ordered := domain.PrioritizeCodecs(preferred, codecs)
 
-	hasOpus := false
-	hasL16 := false
-	hasG722 := false
-	hasG711 := false
-
 	for _, c := range ordered {
 		switch c {
 		case domain.CodecOpus:
-			hasOpus = true
+			// Opus Full-band (Highest fidelity stereo/mono, zero-transcode)
+			addFormat(protocol.AudioFormat{Codec: "opus", SampleRate: 48000, Channels: 2, BitDepth: 16})
+			addFormat(protocol.AudioFormat{Codec: "opus", SampleRate: 48000, Channels: 1, BitDepth: 16})
 		case domain.CodecL16:
-			hasL16 = true
+			// L16 Uncompressed PCM (48kHz/44.1kHz Stereo)
+			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 48000, Channels: 2, BitDepth: 16})
+			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 44100, Channels: 2, BitDepth: 16})
 		case domain.CodecG722:
-			hasG722 = true
+			// Wideband 16kHz Mono (Native G.722 match: 1 channel, 16000Hz)
+			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 16000, Channels: 1, BitDepth: 16})
 		case domain.CodecPCMU, domain.CodecPCMA:
-			hasG711 = true
+			// Narrowband 8kHz Mono (Native G.711 match: 1 channel, 8000Hz)
+			addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 8000, Channels: 1, BitDepth: 16})
 		}
 	}
 
-	// 1. Opus Full-band (Highest fidelity stereo/mono, zero-transcode)
-	if hasOpus {
-		addFormat(protocol.AudioFormat{Codec: "opus", SampleRate: 48000, Channels: 2, BitDepth: 16})
-		addFormat(protocol.AudioFormat{Codec: "opus", SampleRate: 48000, Channels: 1, BitDepth: 16})
-	}
-
-	// 2. L16 Uncompressed PCM (48kHz/44.1kHz Stereo)
-	if hasL16 {
-		addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 48000, Channels: 2, BitDepth: 16})
-		addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 44100, Channels: 2, BitDepth: 16})
-	}
-
-	// 3. Wideband 16kHz Mono (Native G.722 match: 1 channel, 16000Hz)
-	if hasG722 {
-		addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 16000, Channels: 1, BitDepth: 16})
-	}
-
-	// 4. Narrowband 8kHz Mono (Native G.711 match: 1 channel, 8000Hz)
-	if hasG711 {
-		addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 8000, Channels: 1, BitDepth: 16})
-	}
-
-	// 5. Standard PCM Stereo fallbacks
+	// Standard PCM Stereo fallbacks
 	addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 48000, Channels: 2, BitDepth: 16})
 	addFormat(protocol.AudioFormat{Codec: "pcm", SampleRate: 44100, Channels: 2, BitDepth: 16})
 
@@ -561,14 +550,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 
 			case startMsg := <-client.StreamStart:
 				// Drain any remaining stale chunks in client.AudioChunks channel from previous stream/seek
-				for {
-					select {
-					case <-client.AudioChunks:
-					default:
-						goto startDrained
-					}
-				}
-			startDrained:
+				drainChannel(client.AudioChunks)
 				if startMsg.Player != nil {
 					currentCodec = strings.ToLower(startMsg.Player.Codec)
 					if currentCodec == "" {
@@ -630,49 +612,20 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 
 			case <-client.StreamClear:
 				ing.logger.Debug("Sendspin stream clear received (flushing buffer)", "player_id", w.cfg.ID)
-				// Drain any remaining stale chunks in client.AudioChunks channel
-				for {
-					select {
-					case <-client.AudioChunks:
-					default:
-						goto clearDrained
-					}
-				}
-			clearDrained:
+				drainChannel(client.AudioChunks)
 				w.handler.OnStreamClear(w.cfg.ID)
 
 			case stateMsg := <-client.ServerState:
 				if stateMsg.Metadata != nil {
-					var trackDuration time.Duration
-					var trackProgMs int
-					if stateMsg.Metadata.Progress != nil {
-						if stateMsg.Metadata.Progress.TrackDuration > 0 {
-							trackDuration = time.Duration(stateMsg.Metadata.Progress.TrackDuration) * time.Millisecond
-						}
-						trackProgMs = stateMsg.Metadata.Progress.TrackProgress
-					}
-
-					currentMeta = domain.StreamMetadata{
-						Title:           ptrString(stateMsg.Metadata.Title),
-						Artist:          ptrString(stateMsg.Metadata.Artist),
-						AlbumArtist:     ptrString(stateMsg.Metadata.AlbumArtist),
-						Album:           ptrString(stateMsg.Metadata.Album),
-						StreamTitle:     ptrString(stateMsg.Metadata.Title),
-						Duration:        trackDuration,
-						ProgressMs:      trackProgMs,
-						ProgressUpdated: time.Now(),
-					}
+					meta, pbState := parseServerMetadata(stateMsg.Metadata)
+					currentMeta = meta
 					w.statsMu.Lock()
 					w.currentMeta = currentMeta
 					w.statsMu.Unlock()
 					w.handler.OnMetadata(w.cfg.ID, currentMeta)
 
-					if stateMsg.Metadata.Progress != nil {
-						if stateMsg.Metadata.Progress.PlaybackSpeed == 0 {
-							w.handler.OnPlaybackState(w.cfg.ID, "paused")
-						} else if stateMsg.Metadata.Progress.PlaybackSpeed > 0 {
-							w.handler.OnPlaybackState(w.cfg.ID, "playing")
-						}
+					if pbState != "" {
+						w.handler.OnPlaybackState(w.cfg.ID, pbState)
 					}
 				}
 
@@ -778,6 +731,36 @@ func (ing *Ingress) clearServerAddr(current string) {
 		ing.logger.Info("Clearing Sendspin server address to allow mDNS rediscovery", "was", current)
 		ing.serverAddr = ""
 	}
+}
+
+func parseServerMetadata(meta *protocol.MetadataState) (domain.StreamMetadata, string) {
+	if meta == nil {
+		return domain.StreamMetadata{}, ""
+	}
+	var trackDuration time.Duration
+	var trackProgMs int
+	var pbState string
+	if meta.Progress != nil {
+		if meta.Progress.TrackDuration > 0 {
+			trackDuration = time.Duration(meta.Progress.TrackDuration) * time.Millisecond
+		}
+		trackProgMs = meta.Progress.TrackProgress
+		if meta.Progress.PlaybackSpeed == 0 {
+			pbState = "paused"
+		} else if meta.Progress.PlaybackSpeed > 0 {
+			pbState = "playing"
+		}
+	}
+	return domain.StreamMetadata{
+		Title:           ptrString(meta.Title),
+		Artist:          ptrString(meta.Artist),
+		AlbumArtist:     ptrString(meta.AlbumArtist),
+		Album:           ptrString(meta.Album),
+		StreamTitle:     ptrString(meta.Title),
+		Duration:        trackDuration,
+		ProgressMs:      trackProgMs,
+		ProgressUpdated: time.Now(),
+	}, pbState
 }
 
 func ptrString(p *string) string {

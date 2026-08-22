@@ -126,16 +126,7 @@ func ParseRemoteSDP(sdpRaw string, fallbackHost string) (*net.UDPAddr, domain.Co
 				remoteIP = m.ConnectionInformation.Address.Address
 			}
 
-			ptToCodec := map[uint8]domain.Codec{}
-			for _, attr := range m.Attributes {
-				if !strings.EqualFold(attr.Key, "rtpmap") {
-					continue
-				}
-				pt, codec, ok := parseRtpmap(attr.Value)
-				if ok {
-					ptToCodec[pt] = codec
-				}
-			}
+			ptToCodec := buildMediaRtpmap(m)
 
 			// Answer should list negotiated format(s); prefer first with known mapping
 			for _, fmtStr := range m.MediaName.Formats {
@@ -148,20 +139,10 @@ func ParseRemoteSDP(sdpRaw string, fallbackHost string) (*net.UDPAddr, domain.Co
 					selectedCodec = c
 					break
 				}
-				// Static payload types (RFC 3551) when rtpmap omitted
-				switch pt {
-				case 0:
-					selectedCodec = domain.CodecPCMU
-				case 8:
-					selectedCodec = domain.CodecPCMA
-				case 9:
-					selectedCodec = domain.CodecG722
-				case 10, 11:
-					selectedCodec = domain.CodecL16
-				default:
-					continue
+				if c, ok := staticRFC3551Codec(pt); ok {
+					selectedCodec = c
+					break
 				}
-				break
 			}
 			break
 		}
@@ -208,16 +189,9 @@ func ParseSDPCodecs(sdpRaw string) []domain.Codec {
 			continue
 		}
 
-		ptToCodec := map[uint8]domain.Codec{}
-		for _, attr := range m.Attributes {
-			if !strings.EqualFold(attr.Key, "rtpmap") {
-				continue
-			}
-			pt, codec, ok := parseRtpmap(attr.Value)
-			if ok {
-				ptToCodec[pt] = codec
-				add(codec)
-			}
+		ptToCodec := buildMediaRtpmap(m)
+		for _, codec := range ptToCodec {
+			add(codec)
 		}
 
 		// Static PTs from m= line when not already covered by rtpmap
@@ -230,19 +204,39 @@ func ParseSDPCodecs(sdpRaw string) []domain.Codec {
 			if _, ok := ptToCodec[pt]; ok {
 				continue
 			}
-			switch pt {
-			case 0:
-				add(domain.CodecPCMU)
-			case 8:
-				add(domain.CodecPCMA)
-			case 9:
-				add(domain.CodecG722)
-			case 10, 11:
-				add(domain.CodecL16)
+			if c, ok := staticRFC3551Codec(pt); ok {
+				add(c)
 			}
 		}
 	}
 	return codecs
+}
+
+func staticRFC3551Codec(pt uint8) (domain.Codec, bool) {
+	switch pt {
+	case 0:
+		return domain.CodecPCMU, true
+	case 8:
+		return domain.CodecPCMA, true
+	case 9:
+		return domain.CodecG722, true
+	case 10, 11:
+		return domain.CodecL16, true
+	default:
+		return "", false
+	}
+}
+
+func buildMediaRtpmap(m *sdp.MediaDescription) map[uint8]domain.Codec {
+	ptToCodec := make(map[uint8]domain.Codec)
+	for _, attr := range m.Attributes {
+		if strings.EqualFold(attr.Key, "rtpmap") {
+			if pt, codec, ok := parseRtpmap(attr.Value); ok {
+				ptToCodec[pt] = codec
+			}
+		}
+	}
+	return ptToCodec
 }
 
 func parseRtpmap(value string) (pt uint8, codec domain.Codec, ok bool) {

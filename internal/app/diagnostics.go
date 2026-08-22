@@ -188,33 +188,8 @@ func buildActiveCallInfo(
 
 	// Buffer timeline calculation
 	now := time.Now()
-	var upStartOffset, upEndOffset, readyStartOffset, readyEndOffset float64
-
-	if !call.rtpStats.UpstreamPlayAtStart.IsZero() && !call.rtpStats.UpstreamPlayAtEnd.IsZero() {
-		upStartOffset = call.rtpStats.UpstreamPlayAtStart.Sub(now).Seconds()
-		if upStartOffset < 0 {
-			upStartOffset = 0
-		}
-		upEndOffset = call.rtpStats.UpstreamPlayAtEnd.Sub(now).Seconds() + 0.02
-		if upEndOffset < upStartOffset {
-			upEndOffset = upStartOffset
-		}
-	} else if call.rtpStats.UpstreamChunks > 0 {
-		upEndOffset = float64(call.rtpStats.UpstreamChunks*20) / 1000.0
-	}
-
-	if !call.rtpStats.ReadyPlayAtStart.IsZero() && !call.rtpStats.ReadyPlayAtEnd.IsZero() {
-		readyStartOffset = call.rtpStats.ReadyPlayAtStart.Sub(now).Seconds()
-		if readyStartOffset < 0 {
-			readyStartOffset = 0
-		}
-		readyEndOffset = call.rtpStats.ReadyPlayAtEnd.Sub(now).Seconds() + 0.02
-		if readyEndOffset < readyStartOffset {
-			readyEndOffset = readyStartOffset
-		}
-	} else if call.rtpStats.ConversionQueue > 0 {
-		readyEndOffset = float64(call.rtpStats.ConversionQueue*20) / 1000.0
-	}
+	upStartOffset, upEndOffset := calcTimelineOffsets(now, call.rtpStats.UpstreamPlayAtStart, call.rtpStats.UpstreamPlayAtEnd, call.rtpStats.UpstreamChunks)
+	readyStartOffset, readyEndOffset := calcTimelineOffsets(now, call.rtpStats.ReadyPlayAtStart, call.rtpStats.ReadyPlayAtEnd, call.rtpStats.ConversionQueue)
 
 	ap.BufferStartSec = trackProgSec + upStartOffset
 	ap.BufferEndSec = trackProgSec + upEndOffset
@@ -339,4 +314,22 @@ func volumeStageForDebug(volumePercent int, muted bool) string {
 	}
 	db := (float64(volumePercent)/100.0)*60.0 - 60.0
 	return fmt.Sprintf("volume %d%% (%.0f dB)", volumePercent, db)
+}
+
+func calcTimelineOffsets(now time.Time, start, end time.Time, chunkCount int) (float64, float64) {
+	if !start.IsZero() && !end.IsZero() {
+		startOffset := start.Sub(now).Seconds()
+		if startOffset < 0 {
+			startOffset = 0
+		}
+		endOffset := end.Sub(now).Seconds() + 0.02
+		if endOffset < startOffset {
+			endOffset = startOffset
+		}
+		return startOffset, endOffset
+	}
+	if chunkCount > 0 {
+		return 0, float64(chunkCount*20) / 1000.0
+	}
+	return 0, 0
 }

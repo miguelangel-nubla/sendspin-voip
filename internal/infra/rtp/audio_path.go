@@ -254,20 +254,7 @@ func (a *AudioPath) processChunkLocked(chunk domain.AudioChunk) error {
 			outCh = 2
 		}
 
-		consumed := a.chunksPendingCount
-		a.chunksPendingCount = 0
-
-		a.ready = append(a.ready, ReadyFrame{
-			Payload:        encoded,
-			PlayAt:         framePlayAt,
-			TimestampUs:    frameTimestampUs,
-			Passthrough:    false,
-			Codec:          a.codec,
-			SampleRate:     a.codec.SampleRate(),
-			Channels:       outCh,
-			ChunksConsumed: consumed,
-		})
-		a.transcodePackets++
+		a.appendTranscodedFrameLocked(encoded, framePlayAt, frameTimestampUs, outCh)
 	}
 
 	a.pathMode = "transcode"
@@ -314,13 +301,17 @@ func (a *AudioPath) flushPcmTailLocked() {
 		outCh = 2
 	}
 
+	a.appendTranscodedFrameLocked(encoded, framePlayAt, a.pcmTimestampUs+a.pcmAccumulatedTime.Microseconds(), outCh)
+}
+
+func (a *AudioPath) appendTranscodedFrameLocked(encoded []byte, playAt time.Time, timestampUs int64, outCh int) {
 	consumed := a.chunksPendingCount
 	a.chunksPendingCount = 0
 
 	a.ready = append(a.ready, ReadyFrame{
 		Payload:        encoded,
-		PlayAt:         framePlayAt,
-		TimestampUs:    a.pcmTimestampUs + a.pcmAccumulatedTime.Microseconds(),
+		PlayAt:         playAt,
+		TimestampUs:    timestampUs,
 		Passthrough:    false,
 		Codec:          a.codec,
 		SampleRate:     a.codec.SampleRate(),

@@ -65,14 +65,7 @@ func (u *UpstreamPlayer) Push(chunk domain.AudioChunk) bool {
 		return false
 	}
 
-	isAfterLast := false
-	if !chunk.PlayAt.IsZero() && !last.PlayAt.IsZero() {
-		isAfterLast = !chunk.PlayAt.Before(last.PlayAt)
-	} else {
-		isAfterLast = chunk.Timestamp >= last.Timestamp
-	}
-
-	if isAfterLast {
+	if isChunkAfter(chunk, last) {
 		u.chunks = append(u.chunks, chunk)
 		return false
 	}
@@ -80,14 +73,7 @@ func (u *UpstreamPlayer) Push(chunk domain.AudioChunk) bool {
 	// Insert in chronological order by PlayAt timeline
 	idx := n
 	for i := n - 1; i >= 0; i-- {
-		cur := u.chunks[i]
-		curAfter := false
-		if !chunk.PlayAt.IsZero() && !cur.PlayAt.IsZero() {
-			curAfter = !chunk.PlayAt.Before(cur.PlayAt)
-		} else {
-			curAfter = chunk.Timestamp >= cur.Timestamp
-		}
-		if curAfter {
+		if isChunkAfter(chunk, u.chunks[i]) {
 			idx = i + 1
 			break
 		}
@@ -100,6 +86,13 @@ func (u *UpstreamPlayer) Push(chunk domain.AudioChunk) bool {
 		u.readIdx++
 	}
 	return false
+}
+
+func isChunkAfter(a, b domain.AudioChunk) bool {
+	if !a.PlayAt.IsZero() && !b.PlayAt.IsZero() {
+		return !a.PlayAt.Before(b.PlayAt)
+	}
+	return a.Timestamp >= b.Timestamp
 }
 
 // PeekNext returns the next unread raw chunk for conversion without consuming it.
