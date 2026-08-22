@@ -176,7 +176,7 @@ func (u *UpstreamPlayer) Peek() (domain.AudioChunk, bool) {
 }
 
 // DiscardBefore removes raw chunks whose scheduled PlayAt is older than cutoff.
-// This allows live mode to instantly drop obsolete audio before conversion without wasting CPU.
+// This allows dropping obsolete audio before conversion without wasting CPU.
 func (u *UpstreamPlayer) DiscardBefore(cutoff time.Time) int {
 	u.mu.Lock()
 	defer u.mu.Unlock()

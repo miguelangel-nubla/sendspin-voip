@@ -107,7 +107,7 @@ Understanding where to place `sendspin-voip` on your network ensures optimal rel
 
 ### 2. High Resilience Across Remote / WAN Links to Music Assistant (Upstream Leg)
 - **Safe Across WAN / Unstable Links**: The upstream connection between **Music Assistant** and **`sendspin-voip`** communicates via TCP / WebSocket streaming.
-- Because `sendspin-voip` utilizes **pre-buffering** (especially in `announcement` mode), audio sent from Home Assistant / Music Assistant is buffered locally before the phone even picks up.
+- Because `sendspin-voip` utilizes **pre-buffering**, audio sent from Home Assistant / Music Assistant is buffered locally before the phone even picks up.
 - Consequently, **the link from Music Assistant to `sendspin-voip` can run over high-latency, imperfect, remote, or routed network paths without issue**, as network fluctuations upstream will not cause audio stuttering or truncated syllables during local SIP playback.
 
 ---

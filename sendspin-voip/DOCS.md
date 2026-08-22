@@ -6,9 +6,9 @@ Bridge **Music Assistant** to generic SIP/VoIP phones (Grandstream, Fanvil, Yeal
 
 - 📢 **Home Assistant Announcements & Alerts**: Reliable auto-answering playback for TTS, doorbells, and notifications with zero initial speech clipping.
 - ⚡ **Native Sendspin Protocol**: Zero-configuration discovery in Music Assistant via mDNS and WebSockets.
--  Pure Go SIP & RTP Stack**: Built-in support for G.722 (HD Voice), PCMU (µ-law), PCMA (A-law), and Opus.
+- 🎵 **Pure Go SIP & RTP Stack**: Built-in support for G.722 (HD Voice), PCMU (µ-law), PCMA (A-law), and Opus.
 - 🤖 **Smart Auto-Answer**: Pre-configured auto-answer headers for Grandstream, Yealink, Snom, Fanvil, and custom headers.
-- ⏱️ **Zero-Speech-Clipping Buffering**: `announcement` mode holds audio until the phone answers; `live` mode provides low-latency music playback.
+- ⏱️ **Zero-Speech-Clipping Pre-Buffering**: Automatically accumulates audio during SIP call setup to prevent clipping initial syllables when the phone answers.
 - 🔀 **Multi-Player Virtualization**: Configure the same physical desk phone as multiple players (e.g. one for high-volume paging announcements, one for background music).
 - 🚨 **Target Concurrency Arbiter**: Automatically preempts background music for high-priority emergency announcements.
 
