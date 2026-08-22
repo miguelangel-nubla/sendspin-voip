@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"fmt"
 	"time"
 
@@ -128,10 +129,7 @@ func buildConsumerAndAudioPathInfo(
 	bitrateOut := 64
 	egressCh := 1
 	if activeCodec == domain.CodecOpus {
-		bitrateOut = bitrateIn
-		if bitrateOut <= 0 {
-			bitrateOut = 128
-		}
+		bitrateOut = cmp.Or(bitrateIn, 128)
 		egressCh = 2
 		if call.rtpStats.PathIngressChannels == 1 {
 			egressCh = 1

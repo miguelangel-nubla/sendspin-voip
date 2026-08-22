@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"net"
 	"strings"
@@ -89,20 +90,12 @@ type IngressPlayerStats struct {
 
 // FormatDescription returns a formatted representation of the active ingress stream format.
 func (s IngressPlayerStats) FormatDescription() string {
-	codec := s.Codec
-	if codec == "" {
-		codec = "opus"
-	}
-	return domain.FormatAudioDescription(codec, s.SampleRate, s.Channels, s.BitDepth)
+	return domain.FormatAudioDescription(cmp.Or(s.Codec, "opus"), s.SampleRate, s.Channels, s.BitDepth)
 }
 
 // BitrateKbps calculates the bitrate in kbps for the ingress format.
 func (s IngressPlayerStats) BitrateKbps() int {
-	codec := s.Codec
-	if codec == "" {
-		codec = "opus"
-	}
-	return domain.CalculateBitrateKbps(codec, s.SampleRate, s.Channels, s.BitDepth)
+	return domain.CalculateBitrateKbps(cmp.Or(s.Codec, "opus"), s.SampleRate, s.Channels, s.BitDepth)
 }
 
 // WebSocketURL returns the normalized WebSocket endpoint URI for the ingress server.
