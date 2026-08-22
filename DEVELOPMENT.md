@@ -20,6 +20,14 @@ This document contains technical details for developers contributing to `sendspi
 
 ---
 
+## 🌐 Network Placement & Prebuffering Considerations
+
+- **Primary Goal**: The application is primarily designed to deliver Home Assistant announcements (TTS, doorbell rings, alerts) to SIP endpoints with zero initial syllable clipping.
+- **Downstream Placement**: `sendspin-voip` should be colocated network-wise close to the SIP endpoints / PBX. Downstream RTP uses unbuffered, real-time UDP pacing (20ms frames). Proximity ensures minimal jitter, low latency, and prevents packet loss on hardware phones with shallow jitter buffers.
+- **Upstream Resilience**: The upstream transport from Music Assistant uses TCP/WebSocket streaming. With `announcement` mode pre-buffering, audio is accumulated while the SIP call is establishing. Therefore, the connection between Music Assistant and `sendspin-voip` can span high-latency, imperfect WAN or cross-VLAN paths without causing audio artifacts.
+
+---
+
 ## 🛠️ Building & Testing
 
 ```bash
@@ -32,3 +40,4 @@ make build
 # Build local Docker image
 make docker
 ```
+

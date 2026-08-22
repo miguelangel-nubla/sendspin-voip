@@ -1,15 +1,21 @@
 # Sendspin VoIP Bridge for Home Assistant
 
-Bridge **Music Assistant** to generic SIP/VoIP phones (Grandstream, Fanvil, Yealink, Snom, Cisco, Asterisk/FreePBX) for announcements, intercom paging, and synchronized music playback.
+Bridge **Music Assistant** to generic SIP/VoIP phones (Grandstream, Fanvil, Yealink, Snom, Cisco, Asterisk/FreePBX) primarily for **Home Assistant TTS announcements, doorbell chimes, and intercom paging**, with support for synchronized background music.
 
 ## Features
 
-- **Native Sendspin Protocol**: Zero-configuration discovery in Music Assistant via mDNS and WebSockets.
-- **Pure Go SIP & RTP Stack**: Built-in support for G.722 (HD Voice), PCMU (µ-law), PCMA (A-law), and Opus.
-- **Smart Auto-Answer**: Pre-configured auto-answer headers for Grandstream, Yealink, Snom, Fanvil, and custom headers.
-- **Zero-Speech-Clipping Buffering**: Configure `announcement` mode to hold audio until the phone answers, or `live` mode for real-time background music.
-- **Multi-Player Virtualization**: Configure the same physical desk phone as multiple players (e.g. one for high-volume paging announcements, one for background music).
-- **Target Concurrency Arbiter**: Automatically preempts background music for high-priority emergency announcements.
+- 📢 **Home Assistant Announcements & Alerts**: Reliable auto-answering playback for TTS, doorbells, and notifications with zero initial speech clipping.
+- ⚡ **Native Sendspin Protocol**: Zero-configuration discovery in Music Assistant via mDNS and WebSockets.
+-  Pure Go SIP & RTP Stack**: Built-in support for G.722 (HD Voice), PCMU (µ-law), PCMA (A-law), and Opus.
+- 🤖 **Smart Auto-Answer**: Pre-configured auto-answer headers for Grandstream, Yealink, Snom, Fanvil, and custom headers.
+- ⏱️ **Zero-Speech-Clipping Buffering**: `announcement` mode holds audio until the phone answers; `live` mode provides low-latency music playback.
+- 🔀 **Multi-Player Virtualization**: Configure the same physical desk phone as multiple players (e.g. one for high-volume paging announcements, one for background music).
+- 🚨 **Target Concurrency Arbiter**: Automatically preempts background music for high-priority emergency announcements.
+
+## 🌐 Network Placement (Technical Notes)
+
+- **SIP & RTP Downstream**: `sendspin-voip` should be placed close network-wise to your SIP phones/PBX (same local LAN or low-jitter network), as downstream RTP audio uses real-time UDP.
+- **Music Assistant Upstream**: The upstream connection to Music Assistant runs over TCP/WebSockets and leverages pre-buffering. This means Music Assistant can reside across WAN links, remote networks, or high-latency segments without causing audio stutter or lost syllables.
 
 ## Configuration
 
@@ -38,3 +44,4 @@ players:
     buffer_mode: "live"
     priority: 1
 ```
+

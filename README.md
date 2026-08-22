@@ -1,16 +1,18 @@
-# Sendspin VoIP Bridge 📞🎶
+# Sendspin VoIP Bridge 📞📢🎶
 
-**Sendspin VoIP Bridge** connects **Music Assistant** to your **SIP/VoIP phones and intercoms** (Grandstream, Fanvil, Yealink, Snom, Cisco, Asterisk, FreePBX), turning any standard VoIP phone into a multi-room smart speaker or whole-house paging endpoint.
+**Sendspin VoIP Bridge** is designed primarily to deliver **Home Assistant announcements, TTS alerts, doorbell chimes, and intercom paging** directly to your **SIP/VoIP phones and endpoints** (Grandstream, Fanvil, Yealink, Snom, Cisco, Asterisk, FreePBX) with **zero initial speech clipping**, while also supporting synchronized background music.
+
+By bridging **Music Assistant** to standard VoIP hardware, it turns any desk phone, wall intercom, or paging horn into an intelligent, auto-answering Home Assistant smart speaker.
 
 ---
 
 ## 🌟 What it does
 
-- 📢 **Plays TTS & Announcements**: Send doorbell chimes, Home Assistant alerts, and voice notifications directly to desk phones or paging horns without cutting off the beginning of the speech.
-- 🎵 **Streams Music**: Play synchronized music to one or more SIP phones.
+- 📢 **Home Assistant Announcements & TTS (Primary Focus)**: Broadcast doorbell chimes, security alerts, and voice notifications directly to desk phones and paging horns without cutting off the beginning of the speech.
+- 🎵 **Streams Background Music**: Play synchronized music to one or more SIP phones when announcements are idle.
+- 🚨 **Smart Priority Preemption**: Music automatically pauses or hangs up when a high-priority Home Assistant alert arrives.
 - ⚡ **Zero-Config Discovery**: Music Assistant discovers your phones automatically over the local network.
-- 🔀 **Multiple Profiles per Phone**: Configure the same physical phone as separate players in Music Assistant (e.g. one for loud auto-answering announcements, one for background music, one that rings the handset).
-- 🚨 **Smart Interruptions**: Music automatically pauses or hangs up when a high-priority announcement arrives.
+- 🔀 **Multiple Profiles per Phone**: Configure the same physical phone as separate players in Music Assistant (e.g. one for high-volume auto-answering announcements, one for background music, one that rings the handset).
 
 ---
 
@@ -102,6 +104,22 @@ players:
 | :--- | :--- | :--- |
 | **`announcement`** (Default) | Holds audio during the SIP call setup and plays from the very beginning once the phone answers (prevents speech clipping). | Doorbell alerts, TTS announcements, intercom paging. |
 | **`live`** | Discards pre-answer buffering to immediately lock into real-time audio playback. | Background music and synchronized playback. |
+
+---
+
+## 🌐 Network Architecture & Placement (Technical Notes)
+
+Understanding where to place `sendspin-voip` on your network ensures optimal reliability and audio fidelity:
+
+### 1. Colocate Close to SIP Endpoints / PBX (Downstream Leg)
+- **Local Network Recommended**: The downstream leg between `sendspin-voip` and your VoIP phones / PBX uses **SIP signaling (UDP 5060)** and **real-time RTP packet transmission (UDP)** at precise 20ms intervals.
+- Standard VoIP phones do not maintain deep jitter buffers for live calls.
+- To prevent packet loss, jitter, and call signaling delays during auto-answer establishment, **`sendspin-voip` works best placed close network-wise to your SIP phones and PBX** (e.g., on the same LAN / VLAN / site).
+
+### 2. High Resilience Across Remote / WAN Links to Music Assistant (Upstream Leg)
+- **Safe Across WAN / Unstable Links**: The upstream connection between **Music Assistant** and **`sendspin-voip`** communicates via TCP / WebSocket streaming.
+- Because `sendspin-voip` utilizes **pre-buffering** (especially in `announcement` mode), audio sent from Home Assistant / Music Assistant is buffered locally before the phone even picks up.
+- Consequently, **the link from Music Assistant to `sendspin-voip` can run over high-latency, imperfect, remote, or routed network paths without issue**, as network fluctuations upstream will not cause audio stuttering or truncated syllables during local SIP playback.
 
 ---
 
