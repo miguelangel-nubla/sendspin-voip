@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -761,85 +760,12 @@ func (s *BridgeService) GetStreamsDebugInfo() map[string]StreamDebugInfo {
 func (s *BridgeService) GetStreamDebugInfo(id string) (StreamDebugInfo, bool) {
 	s.playersMu.RLock()
 	player, exists := s.players[id]
+	s.playersMu.RUnlock()
 	if !exists {
-		s.playersMu.RUnlock()
 		return StreamDebugInfo{}, false
 	}
-	cfg := player.Config
-	vol := player.Volume
-	muted := player.IsMuted
-	isPlaying := player.IsPlaying
-	isGrouped := player.IsGrouped
-	s.playersMu.RUnlock()
 
-	info := StreamDebugInfo{
-		ID:        id,
-		Name:      cfg.Name,
-		State:     "idle",
-		IsPlaying: isPlaying,
-		IsGrouped: isGrouped,
-		Volume:    vol,
-		Muted:     muted,
-		AudioPath: AudioPathDebugInfo{
-			Muted:         muted,
-			VolumePercent: vol,
-		},
-		Producers: make([]ProducerDebugInfo, 0, 1),
-		Consumers: make([]ConsumerDebugInfo, 0, 1),
-	}
-
-	// 1. Gather Producer Info (Sendspin Ingress)
 	ingStats, hasIngress := s.ingress.GetPlayerStats(id)
-	prodState := "disconnected"
-	if ingStats.Connected {
-		if isPlaying {
-			prodState = "streaming"
-		} else {
-			prodState = "connected"
-		}
-	}
-
-	var trackStr string
-	if ingStats.Metadata.Title != "" {
-		if ingStats.Metadata.Artist != "" {
-			trackStr = fmt.Sprintf("%s - %s", ingStats.Metadata.Artist, ingStats.Metadata.Title)
-		} else {
-			trackStr = ingStats.Metadata.Title
-		}
-	}
-
-	prodFormat := "PCM 48000Hz 2ch 16bit"
-	bitrateIn := 1536
-	if hasIngress && ingStats.Codec != "" {
-		if strings.ToLower(ingStats.Codec) == "opus" {
-			prodFormat = fmt.Sprintf("OPUS %dHz %dch", ingStats.SampleRate, ingStats.Channels)
-			bitrateIn = 128
-		} else {
-			prodFormat = fmt.Sprintf("%s %dHz %dch %dbit", strings.ToUpper(ingStats.Codec), ingStats.SampleRate, ingStats.Channels, ingStats.BitDepth)
-			bitrateIn = (ingStats.SampleRate * ingStats.Channels * ingStats.BitDepth) / 1000
-		}
-	} else {
-		prodFormat = "OPUS 48000Hz 2ch"
-		bitrateIn = 128
-	}
-
-	ingressURL := ingStats.ServerAddr
-	if ingressURL != "" && !strings.HasPrefix(ingressURL, "ws://") && !strings.HasPrefix(ingressURL, "http://") {
-		ingressURL = "ws://" + ingressURL + "/sendspin"
-	}
-
-	var trackProgSec float64
-	if isPlaying {
-		trackProgSec = float64(ingStats.Metadata.ProgressMs) / 1000.0
-		if !ingStats.Metadata.ProgressUpdated.IsZero() {
-			trackProgSec += time.Since(ingStats.Metadata.ProgressUpdated).Seconds()
-			if ingStats.Metadata.Duration > 0 && trackProgSec > ingStats.Metadata.Duration.Seconds() {
-				trackProgSec = ingStats.Metadata.Duration.Seconds()
-			}
-		}
-	} else if prodState == "paused" {
-		trackProgSec = float64(ingStats.Metadata.ProgressMs) / 1000.0
-	}
 
 	var discoveredCodecs []string
 	if cached, ok := s.probeCodecs.Load(id); ok {
@@ -848,303 +774,30 @@ func (s *BridgeService) GetStreamDebugInfo(id string) (StreamDebugInfo, bool) {
 		}
 	}
 
-	info.Producers = append(info.Producers, ProducerDebugInfo{
-		Type:           "Sendspin Ingress",
-		URL:            ingressURL,
-		Connected:      ingStats.Connected,
-		Format:         prodFormat,
-		Codec:          ingStats.Codec,
-		SampleRate:     ingStats.SampleRate,
-		Channels:       ingStats.Channels,
-		BitDepth:       ingStats.BitDepth,
-		BitrateKbps:    bitrateIn,
-		OfferedFormats: ingStats.OfferedFormats,
-		ExposedCodecs:  ingStats.ExposedCodecs,
-		State:          prodState,
-		Track:          trackStr,
-		Artist:           ingStats.Metadata.Artist,
-		Title:            ingStats.Metadata.Title,
-		Album:            ingStats.Metadata.Album,
-		AlbumArtist:      ingStats.Metadata.AlbumArtist,
-		TrackDurationSec: ingStats.Metadata.Duration.Seconds(),
-		TrackProgressSec: trackProgSec,
-		ChunksReceived:   ingStats.ChunksReceived,
-		BytesReceived:    ingStats.BytesReceived,
-	})
-
-	info.AudioPath.IngressCodec = ingStats.Codec
-	info.AudioPath.IngressFormat = prodFormat
-	if muted {
-		info.AudioPath.VolumePercent = 0
-	} else {
-		info.AudioPath.VolumePercent = vol
-	}
-
-	// 2. Gather Consumer Info (SIP/RTP Egress)
-	allCodecs := domain.PrioritizeCodecs(cfg.Codec, nil)
-	var offeredSIPCodecs []string
-	for _, c := range allCodecs {
-		offeredSIPCodecs = append(offeredSIPCodecs, fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(c)), c.PayloadType(), c.RTPClockRate()))
-	}
-
-	autoAnswerDesc := string(cfg.AutoAnswer)
-	if cfg.CustomAutoAnswerHeader != "" {
-		autoAnswerDesc = fmt.Sprintf("custom (%s)", cfg.CustomAutoAnswerHeader)
-	}
-
-	val, hasCall := s.activeCalls.Load(id)
-	if hasCall {
+	var callSnap callDiagnosticsSnapshot
+	if val, ok := s.activeCalls.Load(id); ok {
 		call := val.(*activeCallState)
 		call.mu.Lock()
-		sessionState := string(call.session.GetState())
-		effectiveMode := string(call.session.EffectiveMod)
-		priority := call.session.Priority
-		lingerActive := (call.lingerTimer != nil)
-		answered := call.answered
-		startTime := call.session.StartTime
-		answerTime := call.session.AnswerTime
-		streamStartProgress := call.streamStartProgressSec
-		callID := ""
+		callSnap.hasCall = true
+		callSnap.sessionState = string(call.session.GetState())
+		callSnap.effectiveBufferMode = string(call.session.EffectiveMod)
+		callSnap.priority = call.session.Priority
+		callSnap.lingerActive = (call.lingerTimer != nil)
+		callSnap.answered = call.answered
+		callSnap.startTime = call.session.StartTime
+		callSnap.answerTime = call.session.AnswerTime
+		callSnap.streamStartProgSec = call.streamStartProgressSec
 		if call.dialog != nil {
-			callID = call.dialog.CallID()
+			callSnap.callID = call.dialog.CallID()
 		}
 		call.mu.Unlock()
 
-		var activeCodec domain.Codec = cfg.Codec
-		var rtpStats RTPStats
 		if call.rtpSession != nil {
-			rtpStats = call.rtpSession.Stats()
-			if rtpStats.Codec != "" {
-				activeCodec = rtpStats.Codec
-			}
+			callSnap.rtpStats = call.rtpSession.Stats()
 		}
-
-		bufferedCount := rtpStats.UpstreamChunks
-
-		if lingerActive {
-			info.State = "lingering"
-			sessionState = "lingering"
-		} else if sessionState == string(domain.StateActive) {
-			info.State = "active"
-		} else if sessionState == string(domain.StateDialing) {
-			info.State = "dialing"
-		}
-
-		var durationSec float64
-		if !answerTime.IsZero() {
-			durationSec = time.Since(answerTime).Seconds()
-		} else if !startTime.IsZero() {
-			durationSec = time.Since(startTime).Seconds()
-		}
-
-		var localRTPStr string
-		if rtpStats.LocalPort > 0 {
-			localRTPStr = fmt.Sprintf("0.0.0.0:%d", rtpStats.LocalPort)
-		}
-
-		bitrateOut := 64
-		egressCh := 1
-		if activeCodec == domain.CodecOpus {
-			bitrateOut = bitrateIn
-			if bitrateOut <= 0 {
-				bitrateOut = 128
-			}
-			egressCh = 2
-			if rtpStats.PathIngressChannels == 1 {
-				egressCh = 1
-			}
-		}
-
-		egressFormat := fmt.Sprintf("%s %dHz %dch (%d kbps)", strings.ToUpper(string(activeCodec)), activeCodec.SampleRate(), egressCh, bitrateOut)
-		info.AudioPath.EgressCodec = string(activeCodec)
-		info.AudioPath.EgressFormat = egressFormat
-		info.AudioPath.BufferMode = effectiveMode
-		if effectiveMode == "announcement" {
-			info.AudioPath.PreAnswerBuffered = bufferedCount
-		} else {
-			info.AudioPath.PreAnswerBuffered = 0
-		}
-		info.AudioPath.UpstreamChunks = rtpStats.UpstreamChunks
-		info.AudioPath.ConversionQueue = rtpStats.ConversionQueue
-		info.AudioPath.PassthroughPackets = rtpStats.PassthroughPackets
-		info.AudioPath.TranscodePackets = rtpStats.TranscodePackets
-
-		// Calculate buffer timeline positions directly from PlayAt timestamps
-		now := time.Now()
-		var upStartOffset, upEndOffset, readyStartOffset, readyEndOffset float64
-
-		if !rtpStats.UpstreamPlayAtStart.IsZero() && !rtpStats.UpstreamPlayAtEnd.IsZero() {
-			upStartOffset = rtpStats.UpstreamPlayAtStart.Sub(now).Seconds()
-			if upStartOffset < 0 {
-				upStartOffset = 0
-			}
-			upEndOffset = rtpStats.UpstreamPlayAtEnd.Sub(now).Seconds() + 0.02
-			if upEndOffset < upStartOffset {
-				upEndOffset = upStartOffset
-			}
-		} else if rtpStats.UpstreamChunks > 0 {
-			upEndOffset = float64(rtpStats.UpstreamChunks*20) / 1000.0
-		}
-
-		if !rtpStats.ReadyPlayAtStart.IsZero() && !rtpStats.ReadyPlayAtEnd.IsZero() {
-			readyStartOffset = rtpStats.ReadyPlayAtStart.Sub(now).Seconds()
-			if readyStartOffset < 0 {
-				readyStartOffset = 0
-			}
-			readyEndOffset = rtpStats.ReadyPlayAtEnd.Sub(now).Seconds() + 0.02
-			if readyEndOffset < readyStartOffset {
-				readyEndOffset = readyStartOffset
-			}
-		} else if rtpStats.ConversionQueue > 0 {
-			readyEndOffset = float64(rtpStats.ConversionQueue*20) / 1000.0
-		}
-
-		info.AudioPath.PlayheadSec = trackProgSec
-		info.AudioPath.BufferStartSec = trackProgSec + upStartOffset
-		info.AudioPath.BufferEndSec = trackProgSec + upEndOffset
-		info.AudioPath.ReadyStartSec = trackProgSec + readyStartOffset
-		info.AudioPath.ReadyEndSec = trackProgSec + readyEndOffset
-
-		if effectiveMode == "announcement" {
-			var dialDelaySec float64
-			if !startTime.IsZero() {
-				if answered && !answerTime.IsZero() {
-					dialDelaySec = answerTime.Sub(startTime).Seconds()
-				} else {
-					dialDelaySec = time.Since(startTime).Seconds()
-				}
-			}
-			info.AudioPath.PreAnswerBuffered = int(dialDelaySec / 0.02)
-
-			if !answered {
-				info.AudioPath.HoldBackStartSec = streamStartProgress
-				info.AudioPath.HoldBackEndSec = streamStartProgress + dialDelaySec
-			} else {
-				phonePlayoutSec := streamStartProgress + durationSec
-				if phonePlayoutSec > trackProgSec {
-					phonePlayoutSec = trackProgSec
-				}
-				info.AudioPath.HoldBackStartSec = phonePlayoutSec
-				info.AudioPath.HoldBackEndSec = phonePlayoutSec + dialDelaySec
-			}
-		} else {
-			info.AudioPath.PreAnswerBuffered = 0
-		}
-
-		volDesc := volumeStageForDebug(info.AudioPath.VolumePercent, muted)
-
-		switch {
-		case !answered:
-			info.AudioPath.Mode = "buffering"
-			info.AudioPath.Passthrough = false
-			info.AudioPath.Summary = fmt.Sprintf("1. Upstream buffer (%d chunks, mode=%s) → 2. Transcode (%s) → 3. RTP %s",
-				bufferedCount, effectiveMode, volDesc, strings.ToUpper(string(activeCodec)))
-			info.AudioPath.Stages = []string{
-				fmt.Sprintf("Stage 1: Upstream Ingestion & Raw Buffer (%d chunks, start protected)", bufferedCount),
-				fmt.Sprintf("Stage 2: Transcoding & Gain (%s, ready on SIP 200 OK)", volDesc),
-				fmt.Sprintf("Stage 3: Downstream RTP Playout (%s mode, waiting for answer)", strings.ToUpper(effectiveMode)),
-			}
-		case rtpStats.PathMode != "":
-			info.AudioPath.Mode = rtpStats.PathMode
-			info.AudioPath.Passthrough = rtpStats.PathMode == "opus_passthrough"
-			info.AudioPath.Summary = rtpStats.PathSummary
-			info.AudioPath.Stages = rtpStats.PathStages
-			if rtpStats.PathVolumePercent > 0 || rtpStats.PathMode != "" {
-				info.AudioPath.VolumePercent = rtpStats.PathVolumePercent
-			}
-			if rtpStats.PathIngressCodec != "" {
-				info.AudioPath.IngressCodec = rtpStats.PathIngressCodec
-				info.AudioPath.IngressFormat = fmt.Sprintf("%s %dHz %dch",
-					strings.ToUpper(rtpStats.PathIngressCodec), rtpStats.PathIngressRate, rtpStats.PathIngressChannels)
-			}
-		case answered:
-			info.AudioPath.Mode = "transcode"
-			info.AudioPath.Summary = prodFormat + " → transcode (" + volDesc + ") → RTP " + strings.ToUpper(string(activeCodec))
-			info.AudioPath.Stages = []string{
-				"Stage 1: Upstream Ingress (" + prodFormat + ")",
-				fmt.Sprintf("Stage 2: Transcode (%s) → %s", volDesc, strings.ToUpper(string(activeCodec))),
-				fmt.Sprintf("Stage 3: Downstream Playout (%s, 20ms pacing)", strings.ToUpper(effectiveMode)),
-			}
-		default:
-			info.AudioPath.Mode = "dialing"
-			info.AudioPath.Summary = "SIP dialing — media path initializing"
-			info.AudioPath.Stages = []string{"Stage 1: Upstream Ingress (" + prodFormat + ")", "Stage 2: Codec Negotiation", "Stage 3: RTP Pending"}
-		}
-
-		info.Consumers = append(info.Consumers, ConsumerDebugInfo{
-			Type:             "SIP/RTP Egress",
-			URL:              cfg.SIPTarget,
-			CallID:           callID,
-			State:            sessionState,
-			ConfigCodec:      string(cfg.Codec),
-			ActiveCodec:      string(activeCodec),
-			DiscoveredCodecs: discoveredCodecs,
-			OfferedCodecs:    offeredSIPCodecs,
-			NegotiatedSDP:    fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(activeCodec)), activeCodec.PayloadType(), activeCodec.RTPClockRate()),
-			RTPClockRate:     activeCodec.RTPClockRate(),
-			PayloadType:      activeCodec.PayloadType(),
-			Format:           egressFormat,
-			LocalRTP:         localRTPStr,
-			RemoteRTP:        rtpStats.RemoteAddr,
-			AutoAnswer:       autoAnswerDesc,
-			BufferMode:       effectiveMode,
-			Priority:         priority,
-			BufferedChunks:   bufferedCount,
-			LingerActive:     lingerActive,
-			PacketsSent:      rtpStats.PacketsSent,
-			BytesSent:        rtpStats.BytesSent,
-			BitrateKbps:      bitrateOut,
-			DurationSec:      durationSec,
-		})
-	} else {
-		bMode := cfg.BufferMode
-		if bMode == "" {
-			bMode = s.config.DefaultBufferMode
-		}
-		bitrateOut := 64
-		if cfg.Codec == domain.CodecOpus {
-			bitrateOut = 96
-		}
-		egressFormat := fmt.Sprintf("%s %dHz 1ch (%d kbps)", strings.ToUpper(string(cfg.Codec)), cfg.Codec.SampleRate(), bitrateOut)
-		info.AudioPath.EgressCodec = string(cfg.Codec)
-		info.AudioPath.EgressFormat = egressFormat
-		info.AudioPath.BufferMode = string(bMode)
-		info.AudioPath.Summary = "idle — " + prodFormat + " ⇢ (no call) ⇢ " + strings.ToUpper(string(cfg.Codec))
-		info.AudioPath.Stages = []string{
-			"Stage 1: Upstream Ingress (" + prodFormat + ")",
-			"Stage 2: No active SIP session",
-			"Stage 3: Configured Egress " + strings.ToUpper(string(cfg.Codec)),
-		}
-
-		info.Consumers = append(info.Consumers, ConsumerDebugInfo{
-			Type:             "SIP/RTP Egress",
-			URL:              cfg.SIPTarget,
-			State:            "idle",
-			ConfigCodec:      string(cfg.Codec),
-			ActiveCodec:      string(cfg.Codec),
-			DiscoveredCodecs: discoveredCodecs,
-			OfferedCodecs:    offeredSIPCodecs,
-			NegotiatedSDP:    fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(cfg.Codec)), cfg.Codec.PayloadType(), cfg.Codec.RTPClockRate()),
-			RTPClockRate:     cfg.Codec.RTPClockRate(),
-			PayloadType:      cfg.Codec.PayloadType(),
-			Format:           egressFormat,
-			AutoAnswer:       autoAnswerDesc,
-			BufferMode:       string(bMode),
-			Priority:         cfg.Priority,
-			BitrateKbps:      bitrateOut,
-		})
 	}
 
+	info := buildStreamDebugInfo(player, s.config.DefaultBufferMode, ingStats, hasIngress, discoveredCodecs, callSnap)
 	return info, true
 }
 
-func volumeStageForDebug(volumePercent int, muted bool) string {
-	if muted || volumePercent <= 0 {
-		return "volume mute"
-	}
-	if volumePercent >= 100 {
-		return "volume 100% (0 dB)"
-	}
-	db := (float64(volumePercent)/100.0)*60.0 - 60.0
-	return fmt.Sprintf("volume %d%% (%.0f dB)", volumePercent, db)
-}

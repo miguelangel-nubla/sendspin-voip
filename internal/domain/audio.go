@@ -160,3 +160,56 @@ type RTPPacket struct {
 	Sequence  uint16
 	Duration  time.Duration
 }
+
+// DisplayName returns an uppercase presentation name for the codec.
+func (c Codec) DisplayName() string {
+	switch c {
+	case CodecG722:
+		return "G.722"
+	case CodecPCMU:
+		return "G.711u"
+	case CodecPCMA:
+		return "G.711a"
+	default:
+		return strings.ToUpper(string(c))
+	}
+}
+
+// DefaultBitrateKbps returns the standard expected bitrate in kbps.
+func (c Codec) DefaultBitrateKbps() int {
+	switch c {
+	case CodecOpus:
+		return 128
+	case CodecL16:
+		return 1536
+	default:
+		return 64
+	}
+}
+
+// DefaultChannels returns the standard channel layout count.
+func (c Codec) DefaultChannels() int {
+	switch c {
+	case CodecOpus, CodecL16:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// FormatDescription returns a human-readable stream description, e.g. "G.722 16000Hz 1ch (64 kbps)".
+func (c Codec) FormatDescription(channels, bitrateKbps int) string {
+	if channels <= 0 {
+		channels = c.DefaultChannels()
+	}
+	if bitrateKbps <= 0 {
+		bitrateKbps = c.DefaultBitrateKbps()
+	}
+	return fmt.Sprintf("%s %dHz %dch (%d kbps)", c.DisplayName(), c.SampleRate(), channels, bitrateKbps)
+}
+
+// SDPDescription returns SDP summary string, e.g. "OPUS (pt=96, clock=48000Hz)".
+func (c Codec) SDPDescription() string {
+	return fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(c)), c.PayloadType(), c.RTPClockRate())
+}
+
