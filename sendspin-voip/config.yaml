@@ -1,6 +1,6 @@
 name: "Sendspin VoIP Bridge"
 slug: "sendspin_voip"
-version: "1.0.2"
+version: "1.0.2" # x-release-please-version
 description: "Bridge Music Assistant to SIP/VoIP phones for announcements and synchronized music."
 url: "https://github.com/miguelangel-nubla/sendspin-voip"
 image: "ghcr.io/miguelangel-nubla/sendspin-voip-{arch}"
