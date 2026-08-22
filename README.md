@@ -70,7 +70,6 @@ players:
     name: "Office Desk (Announcements)"
     sip_target: "sip:101@192.168.1.50"
     codec: "g722" # HD Voice
-    buffer_mode: "announcement"
     auto_answer: "intercom"
     priority: 10
     default_volume: 100
@@ -80,7 +79,6 @@ players:
     name: "Office Desk (Music)"
     sip_target: "sip:101@192.168.1.50"
     codec: "g722"
-    buffer_mode: "live"
     auto_answer: "intercom"
     priority: 1
     default_volume: 50
@@ -90,20 +88,11 @@ players:
     name: "Office Phone (Doorbell Ring)"
     sip_target: "sip:101@192.168.1.50"
     codec: "pcmu"
-    buffer_mode: "announcement"
     auto_answer: "none"
     priority: 5
     default_volume: 80
 ```
 
----
-
-## 🎛️ Playback & Buffering Modes
-
-| Mode | Description | Best For |
-| :--- | :--- | :--- |
-| **`announcement`** (Default) | Holds audio during the SIP call setup and plays from the very beginning once the phone answers (prevents speech clipping). | Doorbell alerts, TTS announcements, intercom paging. |
-| **`live`** | Discards pre-answer buffering to immediately lock into real-time audio playback. | Background music and synchronized playback. |
 
 ---
 

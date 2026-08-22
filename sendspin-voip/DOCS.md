@@ -34,14 +34,13 @@ players:
     name: "Office Desk (Announcements)"
     sip_target: "sip:101@192.168.1.50"
     codec: "g722"
-    buffer_mode: "announcement"
     priority: 10
 
   - id: "office_phone_music"
     name: "Office Desk (Music)"
     sip_target: "sip:101@192.168.1.50"
     codec: "g722"
-    buffer_mode: "live"
     priority: 1
 ```
+
 
