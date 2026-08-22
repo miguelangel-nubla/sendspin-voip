@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"sync"
 	"time"
 
@@ -373,6 +374,34 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 	}
 
 	call.setDialog(dialog)
+
+	type sdpUpdatable interface {
+		SetSDPUpdateHandler(func(remoteAddr *net.UDPAddr, codec domain.Codec))
+	}
+	if u, ok := dialog.(sdpUpdatable); ok {
+		u.SetSDPUpdateHandler(func(remoteAddr *net.UDPAddr, codec domain.Codec) {
+			s.logger.Info("SIP dialog updated SDP via Re-INVITE",
+				"player_id", cfg.ID,
+				"remote_rtp", remoteAddr.String(),
+				"codec", codec,
+			)
+			if remoteAddr != nil && call.rtpSession != nil {
+				_ = call.rtpSession.StartTransmission(remoteAddr)
+			}
+			if codec != "" && call.rtpSession != nil {
+				call.rtpSession.SetCodec(codec)
+			}
+		})
+	}
+
+	type dtmfSettable interface {
+		SetDTMFHandler(func(digit string))
+	}
+	if d, ok := dialog.(dtmfSettable); ok {
+		d.SetDTMFHandler(func(digit string) {
+			s.handleDTMF(cfg.ID, digit)
+		})
+	}
 
 	remoteRTP := dialog.RemoteRTPAddr()
 	if remoteRTP == nil {

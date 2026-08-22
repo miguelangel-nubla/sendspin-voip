@@ -20,8 +20,7 @@ type TranscoderFactory func() app.AudioTranscoderPort
 type Streamer struct {
 	logger            *slog.Logger
 	transcoderFactory TranscoderFactory
-	portMin           int
-	portMax           int
+	portPool          *PortPool
 	mu                sync.Mutex
 }
 
@@ -33,18 +32,11 @@ func NewStreamer(logger *slog.Logger, factory TranscoderFactory, portMin, portMa
 	if factory == nil {
 		panic("rtp.NewStreamer: transcoder factory is required")
 	}
-	if portMin <= 0 {
-		portMin = 10000
-	}
-	if portMax <= portMin {
-		portMax = 20000
-	}
 
 	return &Streamer{
 		logger:            logger,
 		transcoderFactory: factory,
-		portMin:           portMin,
-		portMax:           portMax,
+		portPool:          NewPortPool(portMin, portMax),
 	}
 }
 
@@ -59,7 +51,7 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 	audioPath := NewAudioPath(s.transcoderFactory(), activeCodec, 100)
 
 	// 2. Transmitter (20ms playout pacing, PlayAt timing sync, RFC 3550 RTP, and UDP socket)
-	transmitter, err := NewTransmitter(s.logger, audioPath, activeCodec, s.portMin, s.portMax)
+	transmitter, err := NewTransmitter(s.logger, audioPath, activeCodec, s.portPool)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize RTP transmitter: %w", err)
 	}

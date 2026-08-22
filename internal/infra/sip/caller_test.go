@@ -186,3 +186,78 @@ func TestCaller_MockUAS_ProbeAndDial(t *testing.T) {
 		t.Errorf("dialog.Bye failed: %v", err)
 	}
 }
+
+func TestParseExpiresHeader(t *testing.T) {
+	// 1. Standard Expires header
+	res := sipgotypes.NewResponse(200, "OK")
+	res.AppendHeader(sipgotypes.NewHeader("Expires", "120"))
+	if exp := parseExpiresHeader(res); exp != 120*time.Second {
+		t.Errorf("expected 120s, got %v", exp)
+	}
+
+	// 2. Contact header expires parameter
+	res2 := sipgotypes.NewResponse(200, "OK")
+	contact := sipgotypes.ContactHeader{
+		Address: sipgotypes.Uri{User: "sendspin", Host: "127.0.0.1"},
+		Params:  sipgotypes.HeaderParams{sipgotypes.HeaderKV{K: "expires", V: "300"}},
+	}
+	res2.AppendHeader(&contact)
+	if exp := parseExpiresHeader(res2); exp != 300*time.Second {
+		t.Errorf("expected 300s, got %v", exp)
+	}
+
+	// 3. Fallback default
+	res3 := sipgotypes.NewResponse(200, "OK")
+	if exp := parseExpiresHeader(res3); exp != 3600*time.Second {
+		t.Errorf("expected default 3600s, got %v", exp)
+	}
+}
+
+func TestParseInfoDTMF(t *testing.T) {
+	tests := []struct {
+		body     string
+		expected string
+	}{
+		{"Signal=5\r\nDuration=160\r\n", "5"},
+		{"Signal = #\nDuration=100\n", "#"},
+		{"Signal=*\n", "*"},
+		{"Signal=A\n", "A"},
+		{"invalid body", ""},
+	}
+
+	for _, tt := range tests {
+		if digit := parseInfoDTMF(tt.body); digit != tt.expected {
+			t.Errorf("parseInfoDTMF(%q) = %q, want %q", tt.body, digit, tt.expected)
+		}
+	}
+}
+
+func TestDialogWrapper_DynamicSDPUpdate(t *testing.T) {
+	d := &DialogWrapper{
+		remoteRTPAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 40000},
+		codec:         domain.CodecG722,
+		localRTPPort:  30000,
+		callID:        "test-call-id",
+		doneChan:      make(chan struct{}),
+	}
+
+	var updatedAddr *net.UDPAddr
+	var updatedCodec domain.Codec
+	d.SetSDPUpdateHandler(func(remoteAddr *net.UDPAddr, codec domain.Codec) {
+		updatedAddr = remoteAddr
+		updatedCodec = codec
+	})
+
+	newAddr := &net.UDPAddr{IP: net.ParseIP("10.0.0.5"), Port: 45000}
+	d.updateRemoteSDP(newAddr, domain.CodecOpus)
+
+	if d.RemoteRTPAddr().String() != "10.0.0.5:45000" {
+		t.Errorf("expected updated address 10.0.0.5:45000, got %v", d.RemoteRTPAddr())
+	}
+	if d.RemoteCodec() != domain.CodecOpus {
+		t.Errorf("expected updated codec Opus, got %s", d.RemoteCodec())
+	}
+	if updatedAddr.String() != "10.0.0.5:45000" || updatedCodec != domain.CodecOpus {
+		t.Errorf("callback not fired with expected values: addr=%v codec=%v", updatedAddr, updatedCodec)
+	}
+}

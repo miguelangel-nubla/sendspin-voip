@@ -22,6 +22,7 @@ type Transmitter struct {
 	audioPath  *AudioPath
 	conn       *net.UDPConn
 	localPort  int
+	portPool   *PortPool
 	remoteAddr *net.UDPAddr
 
 	// RFC 3550 RTP state
@@ -51,39 +52,24 @@ type Transmitter struct {
 	wg          sync.WaitGroup
 }
 
-// NewTransmitter allocates a local UDP socket on an available even port in the given range
+// NewTransmitter allocates a local UDP socket on an available even port from the port pool
 // and initializes the timed RTP transmitter.
 func NewTransmitter(
 	logger *slog.Logger,
 	audioPath *AudioPath,
 	codec domain.Codec,
-	minPort, maxPort int,
+	portPool *PortPool,
 ) (*Transmitter, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if minPort <= 0 {
-		minPort = 10000
-	}
-	if maxPort <= 0 || maxPort < minPort {
-		maxPort = 20000
+	if portPool == nil {
+		portPool = NewPortPool(10000, 20000)
 	}
 
-	var conn *net.UDPConn
-	var localPort int
-
-	for port := minPort; port <= maxPort; port += 2 {
-		addr := &net.UDPAddr{IP: net.ParseIP("0.0.0.0"), Port: port}
-		c, err := net.ListenUDP("udp", addr)
-		if err == nil {
-			conn = c
-			localPort = port
-			break
-		}
-	}
-
-	if conn == nil {
-		return nil, fmt.Errorf("failed to bind UDP port in range [%d, %d]", minPort, maxPort)
+	conn, localPort, err := portPool.Allocate()
+	if err != nil {
+		return nil, fmt.Errorf("failed to allocate RTP UDP port: %w", err)
 	}
 
 	var ssrcBytes [4]byte
@@ -100,6 +86,7 @@ func NewTransmitter(
 		audioPath:   audioPath,
 		conn:        conn,
 		localPort:   localPort,
+		portPool:    portPool,
 		ssrc:        ssrc,
 		sequenceNum: seq,
 		firstPkt:    true,
@@ -465,9 +452,15 @@ func (t *Transmitter) DrainAndClose(drainDelay time.Duration) error {
 	if t.conn != nil {
 		_ = t.conn.Close()
 	}
+	port := t.localPort
+	pool := t.portPool
 	t.mu.Unlock()
 
 	t.wg.Wait()
+
+	if pool != nil && port > 0 {
+		pool.Release(port)
+	}
 
 	if drainDelay > 0 {
 		time.Sleep(drainDelay)

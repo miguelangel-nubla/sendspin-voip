@@ -42,11 +42,12 @@ type Caller struct {
 	localIP       string
 	fromDomain    string
 	activeDialogs map[string]*DialogWrapper
-	registered    bool
-	lastRegister  time.Time
-	ctx           context.Context
-	cancel        context.CancelFunc
-	mu            sync.Mutex
+	registered       bool
+	lastRegister     time.Time
+	registerInterval time.Duration
+	ctx              context.Context
+	cancel           context.CancelFunc
+	mu               sync.Mutex
 }
 
 // NewCaller creates a new SIP caller adapter.
@@ -144,7 +145,7 @@ func (c *Caller) Start(ctx context.Context) error {
 		_ = tx.Respond(res)
 	})
 
-	// Handle incoming in-dialog Re-INVITE requests (e.g. RFC 4028 session timer refresh)
+	// Handle incoming in-dialog Re-INVITE requests (e.g. RFC 4028 session timer refresh or direct media renegotiation)
 	server.OnInvite(func(req *sip.Request, tx sip.ServerTransaction) {
 		callIDHeader := req.CallID()
 		var callID string
@@ -162,8 +163,30 @@ func (c *Caller) Start(ctx context.Context) error {
 			return
 		}
 
+		// If Re-INVITE carries updated SDP (e.g. PBX direct media redirection or renegotiation)
+		body := string(req.Body())
+		if len(body) > 0 && strings.Contains(strings.ToLower(body), "m=audio") {
+			host := req.Source()
+			if h, _, err := net.SplitHostPort(host); err == nil {
+				host = h
+			}
+			if remoteRTP, negotiatedCodec, err := ParseRemoteSDP(body, host); err == nil {
+				dialog.updateRemoteSDP(remoteRTP, negotiatedCodec)
+				c.logger.Debug("Updated remote RTP from Re-INVITE SDP",
+					"call_id", callID,
+					"remote_rtp", remoteRTP.String(),
+					"codec", negotiatedCodec,
+				)
+			}
+		}
+
 		// Re-INVITE session refresh: respond with 200 OK + active SDP
-		sdpAnswer, _ := BuildSDPOffer(c.localIP, dialog.localRTPPort, dialog.codec)
+		dialog.mu.RLock()
+		localPort := dialog.localRTPPort
+		activeCodec := dialog.codec
+		dialog.mu.RUnlock()
+
+		sdpAnswer, _ := BuildSDPOffer(c.localIP, localPort, activeCodec)
 		res := sip.NewResponseFromRequest(req, 200, "OK", []byte(sdpAnswer))
 		res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 		res.AppendHeader(sip.NewHeader("Supported", "timer"))
@@ -177,6 +200,40 @@ func (c *Caller) Start(ctx context.Context) error {
 		})
 		_ = tx.Respond(res)
 		c.logger.Debug("Handled incoming SIP Re-INVITE session refresh", "call_id", callID)
+	})
+
+	server.OnAck(func(req *sip.Request, tx sip.ServerTransaction) {
+		// ACK acknowledged for in-dialog 200 OK
+	})
+
+	server.OnInfo(func(req *sip.Request, tx sip.ServerTransaction) {
+		res := sip.NewResponseFromRequest(req, 200, "OK", nil)
+		_ = tx.Respond(res)
+
+		callID := ""
+		if req.CallID() != nil {
+			callID = req.CallID().Value()
+		}
+
+		c.mu.Lock()
+		dialog := c.activeDialogs[callID]
+		c.mu.Unlock()
+
+		if dialog != nil {
+			if digit := parseInfoDTMF(string(req.Body())); digit != "" {
+				dialog.mu.RLock()
+				handler := dialog.dtmfHandler
+				dialog.mu.RUnlock()
+				if handler != nil {
+					handler(digit)
+				}
+			}
+		}
+	})
+
+	server.OnNotify(func(req *sip.Request, tx sip.ServerTransaction) {
+		res := sip.NewResponseFromRequest(req, 200, "OK", nil)
+		_ = tx.Respond(res)
 	})
 
 	c.ctx, c.cancel = context.WithCancel(context.Background())
@@ -206,22 +263,53 @@ func (c *Caller) Start(ctx context.Context) error {
 }
 
 func (c *Caller) registrationLoop(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Minute)
-	defer ticker.Stop()
+	interval := 50 * time.Second
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			c.logger.Debug("Refreshing SIP PBX registration...")
 			regCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			if err := c.register(regCtx); err != nil {
-				c.logger.Warn("SIP PBX periodic re-registration failed", "err", err)
-			}
+			err := c.register(regCtx)
 			cancel()
+
+			if err != nil {
+				c.logger.Warn("SIP PBX periodic re-registration failed, retrying soon", "err", err)
+				interval = 10 * time.Second
+			} else {
+				c.mu.Lock()
+				if c.registerInterval > 0 {
+					interval = c.registerInterval
+				} else {
+					interval = 50 * time.Second
+				}
+				c.mu.Unlock()
+			}
+			timer.Reset(interval)
 		}
 	}
+}
+
+func parseExpiresHeader(res *sip.Response) time.Duration {
+	if h := res.GetHeader("Expires"); h != nil {
+		if sec, err := strconv.Atoi(strings.TrimSpace(h.Value())); err == nil && sec > 0 {
+			return time.Duration(sec) * time.Second
+		}
+	}
+	if contact := res.Contact(); contact != nil {
+		for _, param := range contact.Params {
+			if strings.EqualFold(param.K, "expires") {
+				if sec, err := strconv.Atoi(strings.TrimSpace(param.V)); err == nil && sec > 0 {
+					return time.Duration(sec) * time.Second
+				}
+			}
+		}
+	}
+	return 3600 * time.Second
 }
 
 func (c *Caller) register(ctx context.Context) error {
@@ -260,11 +348,27 @@ func (c *Caller) register(ctx context.Context) error {
 	}
 
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
+		grantedExpiry := parseExpiresHeader(res)
+		// Proactively renew at 2/3 of lease, clamped between 20s and 50s
+		renewInterval := grantedExpiry * 2 / 3
+		if renewInterval > 50*time.Second {
+			renewInterval = 50 * time.Second
+		}
+		if renewInterval < 20*time.Second {
+			renewInterval = 20 * time.Second
+		}
+
 		c.mu.Lock()
 		c.registered = true
 		c.lastRegister = time.Now()
+		c.registerInterval = renewInterval
 		c.mu.Unlock()
-		c.logger.Info("Successfully registered with SIP PBX", "server", c.config.Server, "user", c.config.Username)
+		c.logger.Info("Successfully registered with SIP PBX",
+			"server", c.config.Server,
+			"user", c.config.Username,
+			"lease", grantedExpiry.String(),
+			"renew_interval", renewInterval.String(),
+		)
 		return nil
 	}
 
@@ -276,11 +380,19 @@ func (c *Caller) register(ctx context.Context) error {
 }
 
 func (c *Caller) handleDigestAuth(ctx context.Context, client *sipgo.Client, req *sip.Request, res *sip.Response) (*sip.Response, error) {
-	if (res.StatusCode == 401 || res.StatusCode == 407) && c.config.Password != "" {
-		return client.DoDigestAuth(ctx, req, res, sipgo.DigestAuth{
+	if c.config.Password == "" {
+		return res, nil
+	}
+	// Handle 401/407 challenges with up to 2 attempts for nonce expiry / stale nonce handling
+	for attempts := 0; attempts < 2 && (res.StatusCode == 401 || res.StatusCode == 407); attempts++ {
+		var err error
+		res, err = client.DoDigestAuth(ctx, req, res, sipgo.DigestAuth{
 			Username: c.config.Username,
 			Password: c.config.Password,
 		})
+		if err != nil {
+			return res, err
+		}
 	}
 	return res, nil
 }
@@ -610,10 +722,13 @@ func detectOutboundIP(sipServer string) net.IP {
 // DialogWrapper wraps sipgo.DialogClientSession to implement app.SIPDialog.
 type DialogWrapper struct {
 	session       *sipgo.DialogClientSession
+	mu            sync.RWMutex
 	remoteRTPAddr *net.UDPAddr
 	codec         domain.Codec
 	localRTPPort  int
 	callID        string
+	dtmfHandler   func(digit string)
+	onSDPUpdate   func(remoteAddr *net.UDPAddr, codec domain.Codec)
 	onBye         func()
 	doneChan      chan struct{}
 	once          sync.Once
@@ -629,11 +744,55 @@ func (d *DialogWrapper) notifyDone() {
 }
 
 func (d *DialogWrapper) RemoteRTPAddr() *net.UDPAddr {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return d.remoteRTPAddr
 }
 
 func (d *DialogWrapper) RemoteCodec() domain.Codec {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return d.codec
+}
+
+func (d *DialogWrapper) updateRemoteSDP(addr *net.UDPAddr, codec domain.Codec) {
+	d.mu.Lock()
+	if addr != nil {
+		d.remoteRTPAddr = addr
+	}
+	if codec != "" {
+		d.codec = codec
+	}
+	fn := d.onSDPUpdate
+	d.mu.Unlock()
+
+	if fn != nil {
+		fn(addr, codec)
+	}
+}
+
+func (d *DialogWrapper) SetDTMFHandler(handler func(digit string)) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.dtmfHandler = handler
+}
+
+func (d *DialogWrapper) SetSDPUpdateHandler(handler func(remoteAddr *net.UDPAddr, codec domain.Codec)) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.onSDPUpdate = handler
+}
+
+func parseInfoDTMF(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "signal") {
+			if _, v, ok := strings.Cut(line, "="); ok {
+				return strings.TrimSpace(v)
+			}
+		}
+	}
+	return ""
 }
 
 // CallID returns the SIP Call-ID negotiated for this dialog.
