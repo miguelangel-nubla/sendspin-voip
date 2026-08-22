@@ -45,7 +45,6 @@ type AudioPath struct {
 	ingressRawRate      int
 	ingressRawChannels  int
 	ingressRawBitDepth  int
-	ingressRawBytesRate int
 
 	// Converted 20ms ready frames buffer
 	ready []ReadyFrame
@@ -78,6 +77,18 @@ func NewAudioPath(transcoder app.AudioTranscoderPort, upstream *UpstreamPlayer, 
 	}
 }
 
+func (a *AudioPath) resetConversionBuffersLocked(rewindUpstream bool) {
+	a.ready = nil
+	a.pcmBuffer = nil
+	a.chunksPendingCount = 0
+	if resetter, ok := a.transcoder.(interface{ Reset() }); ok {
+		resetter.Reset()
+	}
+	if rewindUpstream && a.upstream != nil {
+		a.upstream.RewindRead()
+	}
+}
+
 // SetCodec updates the target transmission codec.
 func (a *AudioPath) SetCodec(codec domain.Codec) {
 	a.mu.Lock()
@@ -87,15 +98,7 @@ func (a *AudioPath) SetCodec(codec domain.Codec) {
 		return
 	}
 	a.codec = codec
-	a.ready = nil
-	a.pcmBuffer = nil
-	a.chunksPendingCount = 0
-	if resetter, ok := a.transcoder.(interface{ Reset() }); ok {
-		resetter.Reset()
-	}
-	if a.upstream != nil {
-		a.upstream.RewindRead()
-	}
+	a.resetConversionBuffersLocked(true)
 }
 
 // SetVolume updates the output volume (0-100).
@@ -107,23 +110,14 @@ func (a *AudioPath) SetVolume(volumePercent int) {
 
 	if volumePercent > 100 {
 		volumePercent = 100
-	}
-	if volumePercent < 0 {
+	} else if volumePercent < 0 {
 		volumePercent = 0
 	}
 	if a.volume == volumePercent {
 		return
 	}
 	a.volume = volumePercent
-	a.ready = nil
-	a.pcmBuffer = nil
-	a.chunksPendingCount = 0
-	if resetter, ok := a.transcoder.(interface{ Reset() }); ok {
-		resetter.Reset()
-	}
-	if a.upstream != nil {
-		a.upstream.RewindRead()
-	}
+	a.resetConversionBuffersLocked(true)
 }
 
 // Fill pulls raw chunks from the encapsulated UpstreamPlayer using the read cursor
@@ -411,12 +405,7 @@ func (a *AudioPath) Clear() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	a.ready = nil
-	a.pcmBuffer = nil
-	a.chunksPendingCount = 0
-	if resetter, ok := a.transcoder.(interface{ Reset() }); ok {
-		resetter.Reset()
-	}
+	a.resetConversionBuffersLocked(false)
 	if a.upstream != nil {
 		a.upstream.Clear()
 	}

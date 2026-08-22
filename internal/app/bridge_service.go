@@ -631,7 +631,7 @@ func (s *BridgeService) OnGroupUpdate(playerID string, isGrouped bool) {
 	s.playersMu.Unlock()
 }
 
-func (s *BridgeService) terminatePlayerCallSync(playerID string, releaseArbiter bool, timeout time.Duration) {
+func (s *BridgeService) terminateCall(playerID string, releaseArbiter bool, drainDelay, byeTimeout time.Duration, async bool) {
 	val, ok := s.activeCalls.LoadAndDelete(playerID)
 	if !ok {
 		return
@@ -639,46 +639,16 @@ func (s *BridgeService) terminatePlayerCallSync(playerID string, releaseArbiter 
 	call := val.(*activeCallState)
 
 	call.cancelLinger()
-
 	call.session.SetState(domain.StateTerminating)
 	call.session.Close()
 
-	if dialog := call.getDialog(); dialog != nil {
-		byeCtx, cancel := context.WithTimeout(context.Background(), timeout)
-		_ = dialog.Bye(byeCtx)
-		cancel()
-	}
-
-	if call.rtpSession != nil {
-		_ = call.rtpSession.DrainAndClose(0)
-	}
-
-	if releaseArbiter {
-		s.arbiter.ReleaseTarget(call.session)
-	}
-	call.session.SetState(domain.StateTerminated)
-}
-
-func (s *BridgeService) terminatePlayerCall(playerID string, releaseArbiter bool) {
-	val, ok := s.activeCalls.LoadAndDelete(playerID)
-	if !ok {
-		return
-	}
-	call := val.(*activeCallState)
-
-	call.cancelLinger()
-
-	call.session.SetState(domain.StateTerminating)
-	call.session.Close()
-
-	go func() {
+	teardown := func() {
 		if dialog := call.getDialog(); dialog != nil {
-			byeCtx, cancel := context.WithTimeout(context.Background(), shutdownByeTimeout)
+			byeCtx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 			_ = dialog.Bye(byeCtx)
 			cancel()
 		}
 
-		drainDelay := time.Duration(s.config.DrainDelayMs) * time.Millisecond
 		if call.rtpSession != nil {
 			_ = call.rtpSession.DrainAndClose(drainDelay)
 		}
@@ -687,7 +657,22 @@ func (s *BridgeService) terminatePlayerCall(playerID string, releaseArbiter bool
 			s.arbiter.ReleaseTarget(call.session)
 		}
 		call.session.SetState(domain.StateTerminated)
-	}()
+	}
+
+	if async {
+		go teardown()
+	} else {
+		teardown()
+	}
+}
+
+func (s *BridgeService) terminatePlayerCallSync(playerID string, releaseArbiter bool, timeout time.Duration) {
+	s.terminateCall(playerID, releaseArbiter, 0, timeout, false)
+}
+
+func (s *BridgeService) terminatePlayerCall(playerID string, releaseArbiter bool) {
+	drainDelay := time.Duration(s.config.DrainDelayMs) * time.Millisecond
+	s.terminateCall(playerID, releaseArbiter, drainDelay, shutdownByeTimeout, true)
 }
 
 // Shutdown cleanly stops all active calls and players. It blocks until every

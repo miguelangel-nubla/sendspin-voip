@@ -88,6 +88,30 @@ func (w *playerWorker) getClient() *protocol.Client {
 	return w.client
 }
 
+func (w *playerWorker) sendSynchronizedState(client *protocol.Client) {
+	w.statsMu.RLock()
+	vol := w.currentVolume
+	muted := w.isMuted
+	w.statsMu.RUnlock()
+	_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+}
+
+func (w *playerWorker) setVolume(client *protocol.Client, vol int) {
+	w.statsMu.Lock()
+	w.currentVolume = vol
+	muted := w.isMuted
+	w.statsMu.Unlock()
+	_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+}
+
+func (w *playerWorker) setMuted(client *protocol.Client, muted bool) {
+	w.statsMu.Lock()
+	w.isMuted = muted
+	vol := w.currentVolume
+	w.statsMu.Unlock()
+	_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+}
+
 // Ingress implements app.PlayerIngressPort using Sendspin wire protocol.
 type Ingress struct {
 	logger       *slog.Logger
@@ -491,11 +515,10 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		w.statsMu.Unlock()
 
 		w.setClient(client)
+		w.sendSynchronizedState(client)
 		w.statsMu.RLock()
 		initVol := w.currentVolume
-		initMuted := w.isMuted
 		w.statsMu.RUnlock()
-		_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: initVol, Muted: initMuted})
 		ing.logger.Info("Player client successfully connected to Music Assistant", "player_id", w.cfg.ID, "volume", initVol)
 
 		var currentMeta domain.StreamMetadata
@@ -582,11 +605,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					"bit_depth", currentBitDepth,
 					"title", currentMeta.Title,
 				)
-				w.statsMu.RLock()
-				vol := w.currentVolume
-				muted := w.isMuted
-				w.statsMu.RUnlock()
-				_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+				w.sendSynchronizedState(client)
 				w.handler.OnStreamStart(w.cfg.ID, currentMeta)
 
 			case <-client.StreamEnd:
@@ -648,20 +667,10 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 
 			case cmd := <-client.ControlMsgs:
 				if cmd.Command == "volume" {
-					w.statsMu.Lock()
-					w.currentVolume = cmd.Volume
-					vol := w.currentVolume
-					muted := w.isMuted
-					w.statsMu.Unlock()
-					_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+					w.setVolume(client, cmd.Volume)
 					w.handler.OnVolumeChange(w.cfg.ID, cmd.Volume)
 				} else if cmd.Command == "mute" {
-					w.statsMu.Lock()
-					w.isMuted = cmd.Mute
-					vol := w.currentVolume
-					muted := w.isMuted
-					w.statsMu.Unlock()
-					_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+					w.setMuted(client, cmd.Mute)
 					w.handler.OnMuteChange(w.cfg.ID, cmd.Mute)
 				}
 

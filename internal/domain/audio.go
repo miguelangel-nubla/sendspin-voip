@@ -153,14 +153,6 @@ type AudioChunk struct {
 	BitDepth   int       // Source bit depth (e.g. 16, 24)
 }
 
-// RTPPacket represents an encoded audio packet ready for network transmission.
-type RTPPacket struct {
-	Payload   []byte
-	Timestamp uint32
-	Sequence  uint16
-	Duration  time.Duration
-}
-
 // DisplayName returns an uppercase presentation name for the codec.
 func (c Codec) DisplayName() string {
 	switch c {
