@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.3](https://github.com/miguelangel-nubla/sendspin-voip/compare/v1.0.2...v1.0.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **ci:** grant packages write permission for release-please reusable workflow ([7f87394](https://github.com/miguelangel-nubla/sendspin-voip/commit/7f87394de89b09d57a862a3ee243d22a4caa8c45))
+* **ci:** make tag_name input optional for reusable release workflow ([304adf6](https://github.com/miguelangel-nubla/sendspin-voip/commit/304adf6a062b5e8a16f8382df6fd6ecebfe1d282))
+
 ## 1.0.2
 
 - feat: centralize version metadata and add automated release workflow
