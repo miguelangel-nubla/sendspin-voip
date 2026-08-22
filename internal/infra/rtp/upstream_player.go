@@ -141,6 +141,9 @@ func (u *UpstreamPlayer) AcknowledgePlayed(n int) {
 	if u.readIdx < 0 {
 		u.readIdx = 0
 	}
+	if len(u.chunks) == 0 {
+		u.chunks = u.chunks[:0]
+	}
 }
 
 // Pop retrieves and removes the oldest raw chunk from the timeline.
@@ -155,6 +158,9 @@ func (u *UpstreamPlayer) Pop() (domain.AudioChunk, bool) {
 	u.chunks = u.chunks[1:]
 	if u.readIdx > 0 {
 		u.readIdx--
+	}
+	if len(u.chunks) == 0 {
+		u.chunks = u.chunks[:0]
 	}
 	return chunk, true
 }
@@ -189,6 +195,9 @@ func (u *UpstreamPlayer) DiscardBefore(cutoff time.Time) int {
 	u.readIdx -= dropped
 	if u.readIdx < 0 {
 		u.readIdx = 0
+	}
+	if len(u.chunks) == 0 {
+		u.chunks = u.chunks[:0]
 	}
 	return dropped
 }

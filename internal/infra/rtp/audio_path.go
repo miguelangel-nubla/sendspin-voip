@@ -257,6 +257,10 @@ func (a *AudioPath) processChunkLocked(chunk domain.AudioChunk) error {
 		a.appendTranscodedFrameLocked(encoded, framePlayAt, frameTimestampUs, outCh)
 	}
 
+	if len(a.pcmBuffer) == 0 {
+		a.pcmBuffer = a.pcmBuffer[:0]
+	}
+
 	a.pathMode = "transcode"
 	a.pathVolumePercent = a.volume
 	a.pathIngressCodec = inCodec
@@ -332,6 +336,9 @@ func (a *AudioPath) PopReady() (ReadyFrame, bool) {
 	}
 	frame := a.ready[0]
 	a.ready = a.ready[1:]
+	if len(a.ready) == 0 {
+		a.ready = a.ready[:0]
+	}
 	if a.upstream != nil && frame.ChunksConsumed > 0 {
 		a.upstream.AcknowledgePlayed(frame.ChunksConsumed)
 	}
@@ -371,6 +378,9 @@ func (a *AudioPath) DiscardBefore(cutoff time.Time) int {
 		} else {
 			break
 		}
+	}
+	if len(a.ready) == 0 {
+		a.ready = a.ready[:0]
 	}
 	return dropped
 }

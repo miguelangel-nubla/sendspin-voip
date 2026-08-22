@@ -249,6 +249,9 @@ func (t *Transcoder) encodeOpus(pcm16 []int16, channels int) ([]byte, error) {
 
 	frame := t.opusPCMBuf[:needed]
 	t.opusPCMBuf = t.opusPCMBuf[needed:]
+	if len(t.opusPCMBuf) == 0 {
+		t.opusPCMBuf = t.opusPCMBuf[:0]
+	}
 
 	out := make([]byte, 4000)
 	n, err := t.opusEnc.EncodeInt16(frame, out)

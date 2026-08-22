@@ -513,12 +513,12 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		_ = client.SendTimeSync(time.Now().UnixMicro())
 
 		timeSyncTicker := time.NewTicker(2 * time.Second)
-		defer timeSyncTicker.Stop()
 
 	eventLoop:
 		for {
 			select {
 			case <-w.ctx.Done():
+				timeSyncTicker.Stop()
 				w.statsMu.Lock()
 				w.connected = false
 				w.statsMu.Unlock()
@@ -526,6 +526,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				client.Close()
 				return
 			case <-done:
+				timeSyncTicker.Stop()
 				w.statsMu.Lock()
 				w.connected = false
 				w.statsMu.Unlock()
