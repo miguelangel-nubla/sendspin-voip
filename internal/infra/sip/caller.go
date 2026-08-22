@@ -329,6 +329,13 @@ func (c *Caller) register(ctx context.Context) error {
 	}
 
 	req := sip.NewRequest(sip.REGISTER, recipientURI)
+	if c.config.Server != "" {
+		dest := c.config.Server
+		if !strings.Contains(dest, ":") {
+			dest = net.JoinHostPort(dest, "5060")
+		}
+		req.SetDestination(dest)
+	}
 	fromURI := sip.Uri{
 		User: c.config.Username,
 		Host: recipientURI.Host,
@@ -448,6 +455,27 @@ func (c *Caller) LocalIP() string {
 	return c.localIP
 }
 
+func (c *Caller) parseTargetURI(target string) (sip.Uri, error) {
+	var recipientURI sip.Uri
+	targetStr := domain.NormalizeSIPTarget(target)
+
+	// In PBX mode, allow shorthand extensions (e.g. "8003" or "sip:8003") without "@domain"
+	if !strings.Contains(targetStr, "@") && c.fromDomain != "" {
+		hostPart := strings.TrimPrefix(targetStr, "sip:")
+		if h, _, err := net.SplitHostPort(hostPart); err == nil {
+			hostPart = h
+		}
+		if net.ParseIP(hostPart) == nil {
+			targetStr = targetStr + "@" + c.fromDomain
+		}
+	}
+
+	if err := sip.ParseUri(targetStr, &recipientURI); err != nil {
+		return recipientURI, fmt.Errorf("invalid SIP target URI %q: %w", target, err)
+	}
+	return recipientURI, nil
+}
+
 // ProbeTarget queries the remote SIP endpoint via OPTIONS to determine availability and supported codecs.
 func (c *Caller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Codec, error) {
 	c.mu.Lock()
@@ -458,20 +486,25 @@ func (c *Caller) ProbeTarget(ctx context.Context, targetURI string) ([]domain.Co
 		return nil, fmt.Errorf("SIP caller is not started")
 	}
 
-	var recipientURI sip.Uri
-	targetStr := domain.NormalizeSIPTarget(targetURI)
-
-	if err := sip.ParseUri(targetStr, &recipientURI); err != nil {
-		return nil, fmt.Errorf("invalid target URI %q: %w", targetURI, err)
+	recipientURI, err := c.parseTargetURI(targetURI)
+	if err != nil {
+		return nil, err
 	}
 
 	fromURI := sip.Uri{
 		User: c.config.Username,
-		Host: c.localIP,
+		Host: c.fromDomain,
 		Port: c.config.LocalSIPPort,
 	}
 
 	req := sip.NewRequest(sip.OPTIONS, recipientURI)
+	if strings.EqualFold(c.config.Mode, "pbx") && c.config.Server != "" {
+		dest := c.config.Server
+		if !strings.Contains(dest, ":") {
+			dest = net.JoinHostPort(dest, "5060")
+		}
+		req.SetDestination(dest)
+	}
 	req.AppendHeader(&sip.FromHeader{Address: fromURI})
 	req.AppendHeader(&sip.ToHeader{Address: recipientURI})
 	req.AppendHeader(&sip.ContactHeader{
@@ -522,11 +555,9 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 		return nil, fmt.Errorf("SIP caller is not started")
 	}
 
-	var recipientURI sip.Uri
-	targetStr := domain.NormalizeSIPTarget(player.SIPTarget)
-
-	if err := sip.ParseUri(targetStr, &recipientURI); err != nil {
-		return nil, fmt.Errorf("invalid sip target URI %q: %w", player.SIPTarget, err)
+	recipientURI, err := c.parseTargetURI(player.SIPTarget)
+	if err != nil {
+		return nil, err
 	}
 
 	// 1. Build SDP offer
@@ -565,7 +596,21 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 	)
 
 	// 3. Send INVITE dialog
-	dialogSession, err := dialogCache.Invite(ctx, recipientURI, []byte(sdpOffer), headers...)
+	req := sip.NewRequest(sip.INVITE, recipientURI)
+	for _, h := range headers {
+		req.AppendHeader(h)
+	}
+	req.SetBody([]byte(sdpOffer))
+
+	if strings.EqualFold(c.config.Mode, "pbx") && c.config.Server != "" {
+		dest := c.config.Server
+		if !strings.Contains(dest, ":") {
+			dest = net.JoinHostPort(dest, "5060")
+		}
+		req.SetDestination(dest)
+	}
+
+	dialogSession, err := dialogCache.WriteInvite(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("SIP INVITE failed: %w", err)
 	}
