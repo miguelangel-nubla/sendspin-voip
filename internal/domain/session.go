@@ -30,7 +30,6 @@ type CallSession struct {
 	AnswerTime time.Time
 	CancelFunc context.CancelFunc
 	Ctx        context.Context
-	DrainDelay time.Duration
 }
 
 // NewCallSession creates a new call session.
@@ -40,7 +39,6 @@ func NewCallSession(
 	sipTarget string,
 	priority int,
 	meta StreamMetadata,
-	drainDelay time.Duration,
 ) *CallSession {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &CallSession{
@@ -53,7 +51,6 @@ func NewCallSession(
 		StartTime:  time.Now(),
 		CancelFunc: cancel,
 		Ctx:        ctx,
-		DrainDelay: drainDelay,
 	}
 }
 

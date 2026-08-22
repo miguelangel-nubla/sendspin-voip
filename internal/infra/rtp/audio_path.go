@@ -60,15 +60,44 @@ type AudioPath struct {
 	transcodePackets    uint64
 }
 
-// NewAudioPath creates a new AudioPath conversion engine wrapping an UpstreamPlayer raw timeline.
-func NewAudioPath(transcoder app.AudioTranscoderPort, upstream *UpstreamPlayer, codec domain.Codec, initialVolume int) *AudioPath {
+// NewAudioPath creates a new AudioPath conversion engine.
+func NewAudioPath(transcoder app.AudioTranscoderPort, codec domain.Codec, initialVolume int) *AudioPath {
 	return &AudioPath{
 		transcoder: transcoder,
-		upstream:   upstream,
+		upstream:   NewUpstreamPlayer(0),
 		codec:      codec,
 		volume:     domain.ClampVolume(initialVolume),
 		ready:      make([]ReadyFrame, 0, 32),
 	}
+}
+
+// Push appends an incoming raw audio chunk into the raw timeline in chronological order.
+// Returns true if a seek jump / timeline discontinuity was detected and the audio pipeline needs clearing.
+func (a *AudioPath) Push(chunk domain.AudioChunk) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.upstream.Push(chunk)
+}
+
+// UpstreamLen returns the count of buffered raw chunks (unplayed).
+func (a *AudioPath) UpstreamLen() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.upstream.Len()
+}
+
+// UpstreamUnreadLen returns the count of raw chunks that have not yet been converted.
+func (a *AudioPath) UpstreamUnreadLen() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.upstream.UnreadLen()
+}
+
+// UpstreamPlayAtBounds returns the wall-clock PlayAt timestamps of the oldest and newest unplayed raw chunks.
+func (a *AudioPath) UpstreamPlayAtBounds() (oldest, newest time.Time, count int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.upstream.PlayAtBounds()
 }
 
 func (a *AudioPath) resetConversionBuffersLocked(rewindUpstream bool) {

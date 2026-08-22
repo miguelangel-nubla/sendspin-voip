@@ -21,9 +21,9 @@ type AppConfig struct {
 	StateFile string         `yaml:"state_file" json:"state_file"`
 	HTTP      HTTPConfig     `yaml:"http" json:"http"`
 	SIP       SIPConfig      `yaml:"sip" json:"sip"`
-	Sendspin  SendspinConfig `yaml:"sendspin" json:"sendspin"`
-	Bridge    BridgeConfig   `yaml:"bridge" json:"bridge"`
-	Players   []PlayerConfig `yaml:"players" json:"players"`
+	Sendspin  SendspinConfig   `yaml:"sendspin" json:"sendspin"`
+	Bridge    app.BridgeConfig `yaml:"bridge" json:"bridge"`
+	Players   []PlayerConfig   `yaml:"players" json:"players"`
 }
 
 // haDataDir is the persistent volume Home Assistant mounts into every add-on.
@@ -69,12 +69,8 @@ type SendspinConfig struct {
 	BufferMs int    `yaml:"buffer_ms" json:"buffer_ms"`
 }
 
-// BridgeConfig defines bridge runtime parameters.
-type BridgeConfig struct {
-	DrainDelayMs      int                   `yaml:"drain_delay_ms" json:"drain_delay_ms"`
-	IdleHangupDelayMs int                   `yaml:"idle_hangup_delay_ms" json:"idle_hangup_delay_ms"`
-	ConflictPolicy    domain.ConflictPolicy `yaml:"target_conflict_policy" json:"target_conflict_policy"`
-}
+// BridgeConfig is an alias to app.BridgeConfig for convenience.
+type BridgeConfig = app.BridgeConfig
 
 // PlayerConfig represents player definition in YAML/JSON.
 type PlayerConfig struct {
@@ -341,11 +337,7 @@ func (c *AppConfig) ToDomainPlayerConfigs() ([]domain.PlayerConfig, error) {
 	return result, nil
 }
 
-// ToBridgeConfig converts to app.BridgeConfig.
+// ToBridgeConfig returns the app.BridgeConfig.
 func (c *AppConfig) ToBridgeConfig() app.BridgeConfig {
-	return app.BridgeConfig{
-		DrainDelayMs:      c.Bridge.DrainDelayMs,
-		IdleHangupDelayMs: c.Bridge.IdleHangupDelayMs,
-		ConflictPolicy:    c.Bridge.ConflictPolicy,
-	}
+	return c.Bridge
 }

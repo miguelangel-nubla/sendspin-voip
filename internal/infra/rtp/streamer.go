@@ -57,13 +57,10 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 		activeCodec = domain.CodecG722
 	}
 
-	// 1. Upstream (raw timeline buffer)
-	upstream := NewUpstreamPlayer(0)
+	// 1. Audio Path (DSP, conversion engine & raw timeline)
+	audioPath := NewAudioPath(s.transcoderFactory(), activeCodec, 100)
 
-	// 2. Audio Path (DSP & conversion engine wrapping Upstream)
-	audioPath := NewAudioPath(s.transcoderFactory(), upstream, activeCodec, 100)
-
-	// 3. Transmitter (20ms playout pacing, PlayAt timing sync, RFC 3550 RTP, and UDP socket)
+	// 2. Transmitter (20ms playout pacing, PlayAt timing sync, RFC 3550 RTP, and UDP socket)
 	transmitter, err := NewTransmitter(s.logger, audioPath, activeCodec, s.portMin, s.portMax)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize RTP transmitter: %w", err)
@@ -72,7 +69,6 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 	sess := &Session{
 		logger:      s.logger,
 		codec:       activeCodec,
-		upstream:    upstream,
 		audioPath:   audioPath,
 		transmitter: transmitter,
 	}
@@ -81,7 +77,7 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 	return sess, nil
 }
 
-// Session implements app.RTPSession coordinating the 3 decoupled stages.
+// Session implements app.RTPSession coordinating the decoupled stages.
 type Session struct {
 	mu        sync.Mutex
 	logger    *slog.Logger
@@ -89,7 +85,6 @@ type Session struct {
 	answered  bool
 	curVolume atomic.Int32
 
-	upstream    *UpstreamPlayer
 	audioPath   *AudioPath
 	transmitter *Transmitter
 }
@@ -135,7 +130,7 @@ func (s *Session) StartTransmission(remoteAddr *net.UDPAddr) error {
 	return nil
 }
 
-// PushAudio pushes incoming raw audio chunk into the UpstreamPlayer timeline.
+// PushAudio pushes incoming raw audio chunk into the AudioPath timeline.
 // Uses lock-free atomic check on volume so WebSocket ingress is never blocked on DSP transcode batches.
 func (s *Session) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 	if volumePercent >= 0 {
@@ -144,12 +139,12 @@ func (s *Session) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 			s.audioPath.SetVolume(volumePercent)
 		}
 	}
-	if s.upstream.Push(chunk) {
+	if s.audioPath.Push(chunk) {
 		// Seek jump / discontinuity occurred: flush converted frames and reset RTP marker
 		s.audioPath.Clear()
 		s.transmitter.ResetMarker()
-		// Re-push the new chunk into fresh upstream
-		s.upstream.Push(chunk)
+		// Re-push the new chunk into fresh upstream timeline
+		s.audioPath.Push(chunk)
 	}
 	return nil
 }
@@ -169,8 +164,8 @@ func (s *Session) Stats() app.RTPStats {
 
 	packetsSent, bytesSent, localPort, remoteStr := s.transmitter.Stats()
 	apStats := s.audioPath.Stats()
-	upChunks := s.upstream.Len()
-	upOldest, upNewest, _ := s.upstream.PlayAtBounds()
+	upChunks := s.audioPath.UpstreamLen()
+	upOldest, upNewest, _ := s.audioPath.UpstreamPlayAtBounds()
 	readyOldest, readyNewest, _ := s.audioPath.ReadyPlayAtBounds()
 
 	pathMode := apStats.Mode

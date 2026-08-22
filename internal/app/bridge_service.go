@@ -21,9 +21,28 @@ const (
 
 // BridgeConfig contains global operational parameters for the bridge.
 type BridgeConfig struct {
-	DrainDelayMs      int
-	IdleHangupDelayMs int
-	ConflictPolicy    domain.ConflictPolicy
+	DrainDelayMs      int                   `yaml:"drain_delay_ms" json:"drain_delay_ms"`
+	IdleHangupDelayMs int                   `yaml:"idle_hangup_delay_ms" json:"idle_hangup_delay_ms"`
+	ConflictPolicy    domain.ConflictPolicy `yaml:"target_conflict_policy" json:"target_conflict_policy"`
+}
+
+// DrainDelay returns the configured drain delay duration (defaults to 500ms).
+func (c BridgeConfig) DrainDelay() time.Duration {
+	if c.DrainDelayMs <= 0 {
+		return 500 * time.Millisecond
+	}
+	return time.Duration(c.DrainDelayMs) * time.Millisecond
+}
+
+// IdleHangupDelay returns the configured idle hangup linger duration (defaults to 5000ms).
+func (c BridgeConfig) IdleHangupDelay() time.Duration {
+	if c.IdleHangupDelayMs < 0 {
+		return 0
+	}
+	if c.IdleHangupDelayMs == 0 {
+		return 5000 * time.Millisecond
+	}
+	return time.Duration(c.IdleHangupDelayMs) * time.Millisecond
 }
 
 type activeCallState struct {
@@ -278,7 +297,6 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		}
 	}
 
-	drainDelay := time.Duration(s.config.DrainDelayMs) * time.Millisecond
 	sessionID := uuid.New().String()
 	session := domain.NewCallSession(
 		sessionID,
@@ -286,7 +304,6 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		playerCfg.SIPTarget,
 		playerCfg.Priority,
 		meta,
-		drainDelay,
 	)
 
 	s.logger.Info("Stream started on player",
@@ -513,7 +530,7 @@ func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 	}
 	call := val.(*activeCallState)
 
-	lingerDelay := time.Duration(s.config.IdleHangupDelayMs) * time.Millisecond
+	lingerDelay := s.config.IdleHangupDelay()
 
 	// Calculate remaining buffer playout duration so the audio finishes playing completely
 	var drainDuration time.Duration
@@ -663,8 +680,7 @@ func (s *BridgeService) terminatePlayerCallSync(playerID string, releaseArbiter 
 }
 
 func (s *BridgeService) terminatePlayerCall(playerID string, releaseArbiter bool) {
-	drainDelay := time.Duration(s.config.DrainDelayMs) * time.Millisecond
-	s.terminateCall(playerID, releaseArbiter, drainDelay, shutdownByeTimeout, true)
+	s.terminateCall(playerID, releaseArbiter, s.config.DrainDelay(), shutdownByeTimeout, true)
 }
 
 // Shutdown cleanly stops all active calls and players. It blocks until every

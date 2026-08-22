@@ -69,13 +69,12 @@ func TestUpstreamPlayer_OutOfOrderInsertion(t *testing.T) {
 }
 
 // TestAudioPath_VolumeChangeRewindsAndReEncodesUnplayed verifies that changing volume
-// discards converted ready frames and rewinds UpstreamPlayer so all unplayed audio is re-encoded with the new volume.
+// discards converted ready frames and rewinds raw timeline so all unplayed audio is re-encoded with the new volume.
 func TestAudioPath_VolumeChangeRewindsAndReEncodesUnplayed(t *testing.T) {
 	transcoder := audio.NewTranscoder()
-	upstream := NewUpstreamPlayer(0)
-	audioPath := NewAudioPath(transcoder, upstream, domain.CodecG722, 100)
+	audioPath := NewAudioPath(transcoder, domain.CodecG722, 100)
 
-	// Push 2 chunks to upstream (total 2 unplayed chunks)
+	// Push 2 chunks to audioPath (total 2 unplayed chunks)
 	chunk1 := domain.AudioChunk{
 		Samples:    make([]int32, 1920),
 		SampleRate: 48000,
@@ -86,8 +85,8 @@ func TestAudioPath_VolumeChangeRewindsAndReEncodesUnplayed(t *testing.T) {
 		SampleRate: 48000,
 		Channels:   2,
 	}
-	upstream.Push(chunk1)
-	upstream.Push(chunk2)
+	audioPath.Push(chunk1)
+	audioPath.Push(chunk2)
 
 	// Convert both chunks into AudioPath ready frames ahead of time
 	if err := audioPath.Fill(2); err != nil {
@@ -96,24 +95,24 @@ func TestAudioPath_VolumeChangeRewindsAndReEncodesUnplayed(t *testing.T) {
 	if audioPath.ReadyLen() != 2 {
 		t.Fatalf("expected 2 ready frames in audioPath, got %d", audioPath.ReadyLen())
 	}
-	if upstream.UnreadLen() != 0 {
-		t.Fatalf("expected 0 unread chunks in upstream, got %d", upstream.UnreadLen())
+	if audioPath.UpstreamUnreadLen() != 0 {
+		t.Fatalf("expected 0 unread chunks in upstream, got %d", audioPath.UpstreamUnreadLen())
 	}
-	if upstream.Len() != 2 {
-		t.Fatalf("expected 2 total unplayed chunks in upstream, got %d", upstream.Len())
+	if audioPath.UpstreamLen() != 2 {
+		t.Fatalf("expected 2 total unplayed chunks in upstream, got %d", audioPath.UpstreamLen())
 	}
 
-	// Change volume: must flush ready frames and rewind read cursor in UpstreamPlayer
+	// Change volume: must flush ready frames and rewind read cursor in raw timeline
 	audioPath.SetVolume(50)
 
 	if audioPath.ReadyLen() != 0 {
 		t.Fatalf("expected ready queue to be flushed on volume change, got %d", audioPath.ReadyLen())
 	}
-	if upstream.UnreadLen() != 2 {
-		t.Fatalf("expected upstream read cursor to rewind to 2 unread chunks, got %d", upstream.UnreadLen())
+	if audioPath.UpstreamUnreadLen() != 2 {
+		t.Fatalf("expected upstream read cursor to rewind to 2 unread chunks, got %d", audioPath.UpstreamUnreadLen())
 	}
-	if upstream.Len() != 2 {
-		t.Fatalf("expected both raw chunks to remain intact in upstream, got len %d", upstream.Len())
+	if audioPath.UpstreamLen() != 2 {
+		t.Fatalf("expected both raw chunks to remain intact in upstream, got len %d", audioPath.UpstreamLen())
 	}
 
 	// Re-convert unplayed chunks with the new volume

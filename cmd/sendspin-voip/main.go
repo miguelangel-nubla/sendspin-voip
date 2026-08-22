@@ -103,7 +103,7 @@ func main() {
 	stateStore := state.NewFileStore(cfg.StateFile)
 	bridgeService := app.NewBridgeService(
 		logger,
-		cfg.ToBridgeConfig(),
+		cfg.Bridge,
 		arbiter,
 		sipCaller,
 		rtpStreamer,
@@ -111,9 +111,9 @@ func main() {
 		stateStore,
 	)
 
-	// 4. Start SIP Stack
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// 4. Root Application Context with Signal Cancellation
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	if err := sipCaller.Start(ctx); err != nil {
 		logger.Error("Failed to start SIP user agent", "err", err)
@@ -155,9 +155,8 @@ func main() {
 	logger.Info("sendspin-voip is running and ready for audio streams")
 
 	// 7. Wait for Termination Signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
+	<-ctx.Done()
+	stop()
 
 	logger.Info("Shutdown signal received, terminating active sessions...")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)

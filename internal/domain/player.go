@@ -51,12 +51,11 @@ type PlayerConfig struct {
 
 // Player represents the state of a registered virtual player.
 type Player struct {
-	Config     PlayerConfig
-	IsGrouped  bool
-	Volume     int // 0-100
-	IsMuted    bool
-	IsPlaying  bool
-	CurrentURI string
+	Config    PlayerConfig
+	IsGrouped bool
+	Volume    int // 0-100
+	IsMuted   bool
+	IsPlaying bool
 }
 
 // ClampVolume restricts a volume percentage to the valid range [0, 100].
