@@ -16,7 +16,7 @@ CROSS_TARGETS := \
 	darwin/amd64/ \
 	windows/amd64/
 
-.PHONY: all build cross clean test test-race vet fmt fmt-check check hooks run docker docker-multiarch
+.PHONY: all build cross clean test test-race vet fmt fmt-check check hooks run docker docker-multiarch release
 
 all: build
 
@@ -73,7 +73,12 @@ clean:
 	rm -rf bin/ dist/
 
 docker:
-	docker build -t sendspin-voip:local .
+	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_DATE=$(BUILD_DATE) -t sendspin-voip:local .
 
 docker-multiarch:
-	docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t ghcr.io/miguelangel-nubla/sendspin-voip:$(VERSION) .
+	docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_DATE=$(BUILD_DATE) -t ghcr.io/miguelangel-nubla/sendspin-voip:$(VERSION) .
+
+# Automate version bump, changelog update, check, commit, and git tagging.
+# Usage: make release [BUMP=patch|minor|major|vX.Y.Z]
+release:
+	./scripts/release.sh $(if $(BUMP),$(BUMP),patch)

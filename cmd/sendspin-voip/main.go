@@ -21,22 +21,27 @@ import (
 	"github.com/miguelangel-nubla/sendspin-voip/internal/infra/sendspin"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/infra/sip"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/infra/state"
+	"github.com/miguelangel-nubla/sendspin-voip/internal/version"
 )
 
 var (
-	// Injected at build time via -ldflags
-	Version   = "dev"
-	Commit    = "none"
-	BuildDate = "unknown"
+	// Populated via -ldflags -X main.<var>=...
+	Version   string
+	Commit    string
+	BuildDate string
 )
 
 func main() {
 	configPath := flag.String("config", "", "Path to YAML configuration file")
-	showVersion := flag.Bool("version", false, "Print version information and exit")
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "Print version information and exit")
+	flag.BoolVar(&showVersion, "v", false, "Print version information and exit (shorthand)")
 	flag.Parse()
 
-	if *showVersion {
-		fmt.Printf("sendspin-voip version %s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
+	ver, commit, buildDate := version.Resolve(Version, Commit, BuildDate)
+
+	if showVersion || (flag.NArg() > 0 && flag.Arg(0) == "version") {
+		fmt.Println(version.Info(ver, commit, buildDate))
 		os.Exit(0)
 	}
 
@@ -66,9 +71,9 @@ func main() {
 	slog.SetDefault(logger)
 
 	logger.Info("Starting sendspin-voip",
-		"version", Version,
-		"commit", Commit,
-		"built", BuildDate,
+		"version", ver,
+		"commit", commit,
+		"built", buildDate,
 	)
 
 	// 3. Domain & Infrastructure Dependency Injection
@@ -96,6 +101,7 @@ func main() {
 	ingress := sendspin.NewIngress(logger, sendspin.IngressConfig{
 		Server:   cfg.Sendspin.Server,
 		BufferMs: cfg.Sendspin.BufferMs,
+		Version:  ver,
 	})
 
 	arbiter := domain.NewTargetArbiter(cfg.Bridge.ConflictPolicy)
@@ -142,9 +148,9 @@ func main() {
 			Listen:      cfg.HTTP.Listen,
 			APIToken:    cfg.HTTP.APIToken,
 			EnablePprof: cfg.HTTP.EnablePprof,
-			Version:     Version,
-			Commit:      Commit,
-			BuildDate:   BuildDate,
+			Version:     ver,
+			Commit:      commit,
+			BuildDate:   buildDate,
 		},
 		bridgeService,
 		sipCaller,

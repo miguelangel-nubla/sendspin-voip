@@ -18,12 +18,14 @@ import (
 	sendspinsync "github.com/Sendspin/sendspin-go/pkg/sync"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/app"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
+	"github.com/miguelangel-nubla/sendspin-voip/internal/version"
 )
 
 // IngressConfig defines Sendspin ingress adapter settings.
 type IngressConfig struct {
 	Server   string // "auto" for mDNS, or "ws://host:port" or "host:port"
 	BufferMs int
+	Version  string // software version reported to the Sendspin server as DeviceInfo
 }
 
 type workerState struct {
@@ -531,6 +533,11 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 			Name:           w.cfg.Name,
 			Version:        1,
 			SupportedRoles: []string{"player@v1", "metadata@v1", "controller@v1"},
+			DeviceInfo: protocol.DeviceInfo{
+				Manufacturer:    version.Manufacturer,
+				ProductName:     version.Product,
+				SoftwareVersion: ing.config.Version,
+			},
 			PlayerV1Support: protocol.PlayerV1Support{
 				SupportedFormats:   supportedFormats,
 				BufferCapacity:     1048576,
