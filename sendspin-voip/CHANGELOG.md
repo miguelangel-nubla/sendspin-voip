@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2
+
+- feat: centralize version metadata and add automated release workflow
+- docs: remove 'show an add-on' badge from README
+- docs: add My Home Assistant 1-click install badges to README
+
 ## 1.0.1
 
 - Explicit network destination routing for PBX servers when SIP server hostname/IP differs from the realm domain.
