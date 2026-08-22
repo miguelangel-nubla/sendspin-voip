@@ -1,6 +1,7 @@
 package rtp
 
 import (
+	"cmp"
 	"slices"
 	"sync"
 	"time"
@@ -30,12 +31,9 @@ type UpstreamPlayer struct {
 // NewUpstreamPlayer creates a new UpstreamPlayer with the specified capacity limit.
 // If maxCapacity <= 0, defaultUpstreamBufferCapacity (6000 chunks = 120s) is used.
 func NewUpstreamPlayer(maxCapacity int) *UpstreamPlayer {
-	if maxCapacity <= 0 {
-		maxCapacity = defaultUpstreamBufferCapacity
-	}
 	return &UpstreamPlayer{
 		chunks:      make([]domain.AudioChunk, 0, 64),
-		maxCapacity: maxCapacity,
+		maxCapacity: cmp.Or(maxCapacity, defaultUpstreamBufferCapacity),
 	}
 }
 

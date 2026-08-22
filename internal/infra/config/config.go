@@ -288,12 +288,7 @@ func (c *AppConfig) ToDomainPlayerConfigs() ([]domain.PlayerConfig, error) {
 				return nil, fmt.Errorf("player %s: %w", p.ID, err)
 			}
 		}
-		autoAnswer = cmp.Or(autoAnswer, domain.AutoAnswerDefault)
-
-		vol := 100
-		if p.DefaultVolume > 0 {
-			vol = domain.ClampVolume(p.DefaultVolume)
-		}
+		vol := cmp.Or(domain.ClampVolume(p.DefaultVolume), 100)
 
 		result[i] = domain.PlayerConfig{
 			ID:                     p.ID,

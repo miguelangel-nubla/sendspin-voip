@@ -1,6 +1,7 @@
 package http
 
 import (
+	"cmp"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -46,15 +47,9 @@ func NewServer(
 	bridgeService *app.BridgeService,
 	sipCaller app.SIPCallerPort,
 ) *Server {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	if cfg.Listen == "" {
-		cfg.Listen = ":8080"
-	}
-	if cfg.Version == "" {
-		cfg.Version = "dev"
-	}
+	logger = cmp.Or(logger, slog.Default())
+	cfg.Listen = cmp.Or(cfg.Listen, ":8080")
+	cfg.Version = cmp.Or(cfg.Version, "dev")
 
 	stopCtx, stopCancel := context.WithCancel(context.Background())
 

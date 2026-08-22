@@ -235,12 +235,8 @@ func (c Codec) DefaultChannels() int {
 
 // FormatDescription returns a human-readable stream description, e.g. "G.722 16000Hz 1ch (64 kbps)".
 func (c Codec) FormatDescription(channels, bitrateKbps int) string {
-	if channels <= 0 {
-		channels = c.DefaultChannels()
-	}
-	if bitrateKbps <= 0 {
-		bitrateKbps = c.DefaultBitrateKbps()
-	}
+	channels = cmp.Or(channels, c.DefaultChannels())
+	bitrateKbps = cmp.Or(bitrateKbps, c.DefaultBitrateKbps())
 	return fmt.Sprintf("%s %dHz %dch (%d kbps)", c.DisplayName(), c.SampleRate(), channels, bitrateKbps)
 }
 

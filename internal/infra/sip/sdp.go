@@ -1,6 +1,7 @@
 package sip
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -16,9 +17,7 @@ import (
 // BuildSDPOffer creates an SDP offer string for the specified codec and local RTP port.
 // An empty preferred codec means "auto": offer DefaultCodecPreferences in fidelity order.
 func BuildSDPOffer(localIP string, rtpPort int, codec domain.Codec) (string, error) {
-	if localIP == "" {
-		localIP = "127.0.0.1"
-	}
+	localIP = cmp.Or(localIP, "127.0.0.1")
 
 	sessionID := uint64(time.Now().UnixNano())
 	var randBuf [8]byte

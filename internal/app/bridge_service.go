@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -28,10 +29,7 @@ type BridgeConfig struct {
 
 // DrainDelay returns the configured drain delay duration (defaults to 500ms).
 func (c BridgeConfig) DrainDelay() time.Duration {
-	if c.DrainDelayMs <= 0 {
-		return 500 * time.Millisecond
-	}
-	return time.Duration(c.DrainDelayMs) * time.Millisecond
+	return time.Duration(cmp.Or(c.DrainDelayMs, 500)) * time.Millisecond
 }
 
 // IdleHangupDelay returns the configured idle hangup linger duration (defaults to 5000ms).
@@ -39,10 +37,7 @@ func (c BridgeConfig) IdleHangupDelay() time.Duration {
 	if c.IdleHangupDelayMs < 0 {
 		return 0
 	}
-	if c.IdleHangupDelayMs == 0 {
-		return 5000 * time.Millisecond
-	}
-	return time.Duration(c.IdleHangupDelayMs) * time.Millisecond
+	return time.Duration(cmp.Or(c.IdleHangupDelayMs, 5000)) * time.Millisecond
 }
 
 type activeCallState struct {
@@ -126,15 +121,9 @@ func NewBridgeService(
 	ingress PlayerIngressPort,
 	stateStore StateStorePort,
 ) *BridgeService {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	if config.DrainDelayMs <= 0 {
-		config.DrainDelayMs = 500
-	}
-	if config.IdleHangupDelayMs < 0 {
-		config.IdleHangupDelayMs = 0
-	} else if config.IdleHangupDelayMs == 0 {
+	logger = cmp.Or(logger, slog.Default())
+	config.DrainDelayMs = cmp.Or(config.DrainDelayMs, 500)
+	if config.IdleHangupDelayMs == 0 {
 		config.IdleHangupDelayMs = 5000
 	}
 

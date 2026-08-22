@@ -49,18 +49,10 @@ type Caller struct {
 
 // NewCaller creates a new SIP caller adapter.
 func NewCaller(logger *slog.Logger, cfg CallerConfig) (*Caller, error) {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	if cfg.LocalSIPPort <= 0 {
-		cfg.LocalSIPPort = 5060
-	}
-	if cfg.Transport == "" {
-		cfg.Transport = "udp"
-	}
-	if cfg.Username == "" {
-		cfg.Username = "sendspin"
-	}
+	logger = cmp.Or(logger, slog.Default())
+	cfg.LocalSIPPort = cmp.Or(cfg.LocalSIPPort, 5060)
+	cfg.Transport = cmp.Or(cfg.Transport, "udp")
+	cfg.Username = cmp.Or(cfg.Username, "sendspin")
 
 	localIP := cmp.Or(cfg.LocalIP, detectOutboundIP(cfg.Server).String())
 	fromDomain := cmp.Or(cfg.Domain, cfg.Server, localIP)

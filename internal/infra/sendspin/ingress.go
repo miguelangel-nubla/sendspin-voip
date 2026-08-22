@@ -1,6 +1,7 @@
 package sendspin
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -106,15 +107,9 @@ type Ingress struct {
 
 // NewIngress creates a new pure-Go Sendspin player ingress adapter.
 func NewIngress(logger *slog.Logger, cfg IngressConfig) *Ingress {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	if cfg.BufferMs <= 0 {
-		cfg.BufferMs = 500
-	}
-	if cfg.Server == "" {
-		cfg.Server = "auto"
-	}
+	logger = cmp.Or(logger, slog.Default())
+	cfg.BufferMs = cmp.Or(cfg.BufferMs, 500)
+	cfg.Server = cmp.Or(cfg.Server, "auto")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -526,20 +521,10 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				// Drain any remaining stale chunks in client.AudioChunks channel from previous stream/seek
 				drainChannel(client.AudioChunks)
 				if startMsg.Player != nil {
-					currentCodec = strings.ToLower(startMsg.Player.Codec)
-					if currentCodec == "" {
-						currentCodec = "pcm"
-					}
-					// Normalize the announced format up front.
-					currentRate = startMsg.Player.SampleRate
-					if currentRate <= 0 {
-						currentRate = primaryRate
-					}
+					currentCodec = cmp.Or(strings.ToLower(startMsg.Player.Codec), "pcm")
+					currentRate = cmp.Or(startMsg.Player.SampleRate, primaryRate)
 					currentChannels = domain.NormalizeChannels(startMsg.Player.Channels, primaryChannels)
-					currentBitDepth = startMsg.Player.BitDepth
-					if currentBitDepth <= 0 {
-						currentBitDepth = 16
-					}
+					currentBitDepth = cmp.Or(startMsg.Player.BitDepth, 16)
 				}
 				w.statsMu.Lock()
 				w.currentCodec = currentCodec
