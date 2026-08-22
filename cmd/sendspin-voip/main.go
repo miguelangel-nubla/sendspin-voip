@@ -100,7 +100,10 @@ func main() {
 
 	arbiter := domain.NewTargetArbiter(cfg.Bridge.ConflictPolicy)
 	logger.Info("Persisting player state", "path", cfg.StateFile)
-	stateStore := state.NewFileStore(cfg.StateFile)
+	stateStore, err := state.NewFileStore(cfg.StateFile)
+	if err != nil {
+		logger.Warn("Failed to load existing player state from file", "path", cfg.StateFile, "err", err)
+	}
 	bridgeService := app.NewBridgeService(
 		logger,
 		cfg.Bridge,

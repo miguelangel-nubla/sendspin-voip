@@ -163,6 +163,14 @@ func (c *Caller) Start(ctx context.Context) error {
 			return
 		}
 
+		select {
+		case <-dialog.Done():
+			res := sip.NewResponseFromRequest(req, 481, "Call/Transaction Does Not Exist", nil)
+			_ = tx.Respond(res)
+			return
+		default:
+		}
+
 		// If Re-INVITE carries updated SDP (e.g. PBX direct media redirection or renegotiation)
 		body := string(req.Body())
 		if len(body) > 0 && strings.Contains(strings.ToLower(body), "m=audio") {
@@ -845,12 +853,6 @@ func (c *Caller) sendAck(ctx context.Context, session *sipgo.DialogClientSession
 
 	maxForwards := sip.MaxForwardsHeader(70)
 	ack.AppendHeader(&maxForwards)
-
-	// Copy Record-Route in reverse order as Route headers if present
-	rrHeaders := inviteRes.GetHeaders("Record-Route")
-	for i := len(rrHeaders) - 1; i >= 0; i-- {
-		ack.AppendHeader(sip.NewHeader("Route", rrHeaders[i].Value()))
-	}
 
 	// In PBX mode or when dialing via a PBX server, route the ACK directly to the PBX server
 	if c.config.Server != "" {

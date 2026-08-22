@@ -71,6 +71,20 @@ func (s *CallSession) GetState() SessionState {
 	return s.State
 }
 
+// GetAnswerTime returns the call answer time thread-safely.
+func (s *CallSession) GetAnswerTime() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.AnswerTime
+}
+
+// GetStartTime returns the call start time thread-safely.
+func (s *CallSession) GetStartTime() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.StartTime
+}
+
 // IsActive returns true if the session is currently connected and streaming.
 func (s *CallSession) IsActive() bool {
 	s.mu.RLock()

@@ -148,3 +148,18 @@ func TestBuildSDPOffer_DeclaresPtime(t *testing.T) {
 		t.Errorf("expected a=ptime:20 in the SDP offer, got:\n%s", offer)
 	}
 }
+
+func TestParseRemoteSDP_RejectsUnsupportedCodec(t *testing.T) {
+	unsupportedSDP := `v=0
+o=phone 987654 1 IN IP4 192.168.1.105
+s=SIP Call
+c=IN IP4 192.168.1.105
+t=0 0
+m=audio 16384 RTP/AVP 102
+a=rtpmap:102 G729/8000
+`
+	_, _, err := ParseRemoteSDP(unsupportedSDP, "192.168.1.105")
+	if err == nil {
+		t.Errorf("expected error for unsupported codec G.729, got nil")
+	}
+}

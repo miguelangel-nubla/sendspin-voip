@@ -82,7 +82,7 @@ type PlayerConfig struct {
 	AutoAnswer             domain.AutoAnswerPreset `yaml:"auto_answer" json:"auto_answer"`
 	CustomAutoAnswerHeader string                  `yaml:"custom_auto_answer_header" json:"custom_auto_answer_header"`
 	Priority               int                     `yaml:"priority" json:"priority"`
-	DefaultVolume          int                     `yaml:"default_volume" json:"default_volume"`
+	DefaultVolume          *int                    `yaml:"default_volume,omitempty" json:"default_volume,omitempty"`
 }
 
 // Load loads configuration from YAML file path, Home Assistant /data/options.json, or environment variables.
@@ -91,20 +91,26 @@ func Load(explicitPath string) (*AppConfig, error) {
 
 	// 1. Check for explicit YAML file or standard paths
 	var foundPath string
-	searchPaths := []string{
-		explicitPath,
-		os.Getenv("CONFIG_PATH"),
-		"/data/options.json", // Home Assistant Add-on options path
-		"config.yaml",
-		"config.yml",
-		"/etc/sendspin-voip/config.yaml",
-	}
+	if explicitPath != "" {
+		if _, err := os.Stat(explicitPath); err != nil {
+			return nil, fmt.Errorf("config file %s not found: %w", explicitPath, err)
+		}
+		foundPath = explicitPath
+	} else {
+		searchPaths := []string{
+			os.Getenv("CONFIG_PATH"),
+			"/data/options.json", // Home Assistant Add-on options path
+			"config.yaml",
+			"config.yml",
+			"/etc/sendspin-voip/config.yaml",
+		}
 
-	for _, p := range searchPaths {
-		if p != "" {
-			if _, err := os.Stat(p); err == nil {
-				foundPath = p
-				break
+		for _, p := range searchPaths {
+			if p != "" {
+				if _, err := os.Stat(p); err == nil {
+					foundPath = p
+					break
+				}
 			}
 		}
 	}
@@ -288,7 +294,10 @@ func (c *AppConfig) ToDomainPlayerConfigs() ([]domain.PlayerConfig, error) {
 				return nil, fmt.Errorf("player %s: %w", p.ID, err)
 			}
 		}
-		vol := cmp.Or(domain.ClampVolume(p.DefaultVolume), 100)
+		vol := 100
+		if p.DefaultVolume != nil {
+			vol = domain.ClampVolume(*p.DefaultVolume)
+		}
 
 		result[i] = domain.PlayerConfig{
 			ID:                     p.ID,

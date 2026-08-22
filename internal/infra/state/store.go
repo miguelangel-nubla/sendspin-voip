@@ -18,13 +18,16 @@ type FileStore struct {
 }
 
 // NewFileStore creates a FileStore and loads any existing persisted state from disk.
-func NewFileStore(filePath string) *FileStore {
+// If loading fails due to a corrupt file or read error, an error is returned.
+func NewFileStore(filePath string) (*FileStore, error) {
 	store := &FileStore{
 		filePath: filePath,
 		states:   make(map[string]app.PlayerStateRecord),
 	}
-	_ = store.load()
-	return store
+	if err := store.load(); err != nil {
+		return store, err
+	}
+	return store, nil
 }
 
 func (s *FileStore) load() error {

@@ -66,17 +66,12 @@ func NewServer(
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
-	writeTimeout := 10 * time.Second
-	if cfg.EnablePprof {
-		writeTimeout = 0
-	}
-
 	s.httpServer = &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           s.authMiddleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      writeTimeout,
+		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       30 * time.Second,
 	}
 
@@ -105,9 +100,17 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	if s.config.EnablePprof {
 		mux.HandleFunc("/debug/pprof/", pprof.Index)
 		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/profile", func(w http.ResponseWriter, r *http.Request) {
+			rc := http.NewResponseController(w)
+			_ = rc.SetWriteDeadline(time.Time{})
+			pprof.Profile(w, r)
+		})
 		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		mux.HandleFunc("/debug/pprof/trace", func(w http.ResponseWriter, r *http.Request) {
+			rc := http.NewResponseController(w)
+			_ = rc.SetWriteDeadline(time.Time{})
+			pprof.Trace(w, r)
+		})
 	}
 }
 
@@ -191,7 +194,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // handleAPIStreams returns streams information.
 func (s *Server) handleAPIStreams(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	src := r.URL.Query().Get("src")
 	if src != "" {
@@ -233,7 +235,6 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	sendUpdate := func() bool {
 		streams := s.bridgeService.GetStreamsDebugInfo()
@@ -289,7 +290,6 @@ type SystemInfo struct {
 // handleAPIInfo returns system status, memory stats, and SIP status.
 func (s *Server) handleAPIInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -328,7 +328,6 @@ func (s *Server) handleAPIInfo(w http.ResponseWriter, r *http.Request) {
 // handleAPICodecs returns supported audio codecs dynamically from domain preferences.
 func (s *Server) handleAPICodecs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	codecs := make([]map[string]any, 0, len(domain.DefaultCodecPreferences))
 	for _, c := range domain.DefaultCodecPreferences {

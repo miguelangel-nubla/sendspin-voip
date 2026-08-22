@@ -35,6 +35,8 @@ type Transmitter struct {
 
 	// RFC 3550 RTCP feedback & RFC 2833 DTMF state
 	dtmfHandler        func(digit string)
+	lastDTMFTimestamp  uint32
+	hasLastDTMF        bool
 	remoteJitterMs     float64
 	remoteFractionLost float64
 	remoteRTTMs        float64
@@ -138,13 +140,10 @@ func (t *Transmitter) SetAnswered(answered bool) {
 	shouldStart := answered && !t.loopRunning
 	if shouldStart {
 		t.loopRunning = true
-	}
-	t.mu.Unlock()
-
-	if shouldStart {
 		t.wg.Add(1)
 		go t.pacingLoop()
 	}
+	t.mu.Unlock()
 }
 
 // ResetMarker triggers the RTP marker bit on the next outgoing packet.
@@ -235,21 +234,35 @@ func (t *Transmitter) readLoop() {
 			return
 		}
 
-		n, _, err := conn.ReadFrom(buf)
+		n, fromAddr, err := conn.ReadFrom(buf)
 		if err != nil {
 			return
 		}
 
 		if n > 0 {
-			t.handleIncomingPacket(buf[:n])
+			t.handleIncomingPacket(buf[:n], fromAddr)
 		}
 	}
 }
 
 // handleIncomingPacket parses incoming RTCP reports and RFC 2833 / 4733 DTMF packets.
-func (t *Transmitter) handleIncomingPacket(data []byte) {
+func (t *Transmitter) handleIncomingPacket(data []byte, fromAddr net.Addr) {
 	if len(data) < 4 {
 		return
+	}
+
+	t.mu.Lock()
+	remoteAddr := t.remoteAddr
+	t.mu.Unlock()
+
+	if remoteAddr == nil {
+		return
+	}
+
+	if udpFrom, ok := fromAddr.(*net.UDPAddr); ok {
+		if !udpFrom.IP.Equal(remoteAddr.IP) {
+			return
+		}
 	}
 
 	version := (data[0] >> 6) & 0x03
@@ -289,15 +302,21 @@ func (t *Transmitter) handleIncomingPacket(data []byte) {
 	// 2. Check for RFC 2833 / RFC 4733 DTMF telephone-event (PT=101)
 	payloadType := pt & 0x7F
 	if payloadType == 101 && len(data) >= 16 {
-		// RTP header is at least 12 bytes
+		// RTP header timestamp at bytes [4:8]
+		ts := binary.BigEndian.Uint32(data[4:8])
 		dtmfPayload := data[12:]
 		evt, err := ParseDTMFPayload(dtmfPayload)
-		if err == nil && evt != nil {
+		if err == nil && evt != nil && evt.Digit != "" {
 			t.mu.Lock()
 			handler := t.dtmfHandler
+			isNewEvent := !t.hasLastDTMF || t.lastDTMFTimestamp != ts
+			if isNewEvent {
+				t.hasLastDTMF = true
+				t.lastDTMFTimestamp = ts
+			}
 			t.mu.Unlock()
 
-			if handler != nil && evt.Digit != "" {
+			if isNewEvent && handler != nil {
 				handler(evt.Digit)
 			}
 		}
@@ -318,6 +337,7 @@ func (t *Transmitter) step() {
 	}
 
 	now := time.Now()
+	samplesPerPacket := uint32((codec.RTPClockRate() * 20) / 1000)
 
 	// 1. Discard stale raw upstream chunks and stale ready frames before conversion (> 150ms behind).
 	staleCutoff := now.Add(-150 * time.Millisecond)
@@ -328,48 +348,35 @@ func (t *Transmitter) step() {
 
 	// 3. Check scheduled playback time (Sendspin clock synchronization)
 	readyFrame, ok := t.audioPath.PeekReady()
-	if !ok {
-		return
-	}
-	if !readyFrame.PlayAt.IsZero() && now.Before(readyFrame.PlayAt) {
-		return
-	}
-
-	// 4. Pop the ready 20ms frame
-	frame, ok := t.audioPath.PopReady()
-	samplesPerPacket := uint32((codec.RTPClockRate() * 20) / 1000)
-
-	if !ok {
-		// During idle lingering / pause, emit a comfort noise / keep-alive frame every ~1 second (50 ticks)
-		t.mu.Lock()
-		t.idleTickCounter++
-		shouldEmitKeepalive := t.idleTickCounter >= 50
-		if shouldEmitKeepalive {
-			t.idleTickCounter = 0
-		}
-		t.mu.Unlock()
-
-		if shouldEmitKeepalive {
+	if ok {
+		if !readyFrame.PlayAt.IsZero() && now.Before(readyFrame.PlayAt) {
+			// Not yet time to play scheduled audio frame; transmit comfort noise / silence
 			silencePayload := generateComfortNoise(codec)
 			_ = t.sendPacket(silencePayload, codec.PayloadType(), samplesPerPacket, false)
+			return
 		}
-		return
+
+		// 4. Pop the ready 20ms frame
+		frame, popped := t.audioPath.PopReady()
+		if popped {
+			if err := t.sendPacket(frame.Payload, codec.PayloadType(), samplesPerPacket, isMarker); err != nil {
+				t.logger.Debug("RTP transmit error", "err", err)
+			}
+
+			if isMarker {
+				t.mu.Lock()
+				t.firstPkt = false
+				t.mu.Unlock()
+			}
+			return
+		}
 	}
 
-	t.mu.Lock()
-	t.idleTickCounter = 0
-	t.mu.Unlock()
-
-	// 5. Build RFC 3550 RTP packet and transmit over UDP
-	if err := t.sendPacket(frame.Payload, codec.PayloadType(), samplesPerPacket, isMarker); err != nil {
-		t.logger.Debug("RTP transmit error", "err", err)
-	}
-
-	if isMarker {
-		t.mu.Lock()
-		t.firstPkt = false
-		t.mu.Unlock()
-	}
+	// 5. When no ready audio frame is available (idle, paused, or buffer underrun),
+	// transmit an RFC-compliant comfort noise / silence frame so the phone's decoder
+	// receives continuous RTP packets and never executes Packet Loss Concealment (PLC) extrapolation.
+	silencePayload := generateComfortNoise(codec)
+	_ = t.sendPacket(silencePayload, codec.PayloadType(), samplesPerPacket, false)
 }
 
 // generateComfortNoise returns an RFC-compliant silence / comfort noise frame for the codec.
@@ -395,6 +402,9 @@ func generateComfortNoise(codec domain.Codec) []byte {
 	case domain.CodecG722:
 		// G.722 16kHz mono (20ms = 160 bytes)
 		return make([]byte, 160)
+	case domain.CodecL16:
+		// L16 48kHz mono (20ms = 960 samples * 2 bytes = 1920 bytes)
+		return make([]byte, 1920)
 	default:
 		return make([]byte, 160)
 	}

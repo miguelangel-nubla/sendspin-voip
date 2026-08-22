@@ -16,7 +16,10 @@ func TestFileStore_SaveAndLoad(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	filePath := filepath.Join(tmpDir, "state.json")
-	store := NewFileStore(filePath)
+	store, err := NewFileStore(filePath)
+	if err != nil {
+		t.Fatalf("unexpected error creating store: %v", err)
+	}
 
 	if _, ok := store.GetPlayerState("player-1"); ok {
 		t.Errorf("expected player-1 not to exist")
@@ -31,7 +34,10 @@ func TestFileStore_SaveAndLoad(t *testing.T) {
 		t.Errorf("unexpected record: %+v", rec)
 	}
 
-	store2 := NewFileStore(filePath)
+	store2, err := NewFileStore(filePath)
+	if err != nil {
+		t.Fatalf("unexpected error reloading store: %v", err)
+	}
 	rec2, ok2 := store2.GetPlayerState("player-1")
 	if !ok2 || rec2.Volume != 58 || rec2.Muted {
 		t.Errorf("unexpected reloaded record: %+v", rec2)
@@ -49,7 +55,10 @@ func TestFileStore_NullStateFileDoesNotPanic(t *testing.T) {
 		t.Fatalf("failed to seed state file: %v", err)
 	}
 
-	store := NewFileStore(path)
+	store, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("unexpected error loading null state: %v", err)
+	}
 
 	if err := store.SetPlayerState("player-desk", app.PlayerStateRecord{Volume: 42, Muted: true}); err != nil {
 		t.Fatalf("SetPlayerState failed: %v", err)
@@ -61,8 +70,23 @@ func TestFileStore_NullStateFileDoesNotPanic(t *testing.T) {
 	}
 
 	// And it must survive a round trip through disk.
-	reloaded := NewFileStore(path)
+	reloaded, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("unexpected error reloading state: %v", err)
+	}
 	if rec, ok := reloaded.GetPlayerState("player-desk"); !ok || rec.Volume != 42 {
 		t.Errorf("expected reloaded volume 42, got %+v (ok=%v)", rec, ok)
+	}
+}
+
+func TestFileStore_CorruptedFileReturnsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "corrupt_state.json")
+	if err := os.WriteFile(path, []byte("invalid-json-{"), 0o644); err != nil {
+		t.Fatalf("failed to seed corrupt state file: %v", err)
+	}
+
+	_, err := NewFileStore(path)
+	if err == nil {
+		t.Errorf("expected error loading corrupted state file, got nil")
 	}
 }

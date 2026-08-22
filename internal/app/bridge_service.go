@@ -150,7 +150,7 @@ func (s *BridgeService) RegisterPlayers(configs []domain.PlayerConfig) error {
 	for i, cfg := range configs {
 		if s.stateStore != nil {
 			if rec, ok := s.stateStore.GetPlayerState(cfg.ID); ok {
-				if rec.Volume > 0 && rec.Volume <= 100 {
+				if rec.Volume >= 0 && rec.Volume <= 100 {
 					cfg.DefaultVolume = rec.Volume
 					configs[i].DefaultVolume = rec.Volume
 				}
@@ -813,6 +813,10 @@ func (s *BridgeService) GetStreamsDebugInfo() map[string]StreamDebugInfo {
 func (s *BridgeService) GetStreamDebugInfo(id string) (StreamDebugInfo, bool) {
 	s.playersMu.RLock()
 	player, exists := s.players[id]
+	var playerCopy domain.Player
+	if exists {
+		playerCopy = *player
+	}
 	s.playersMu.RUnlock()
 	if !exists {
 		return StreamDebugInfo{}, false
@@ -836,8 +840,8 @@ func (s *BridgeService) GetStreamDebugInfo(id string) (StreamDebugInfo, bool) {
 		callSnap.priority = call.session.Priority
 		callSnap.lingerActive = (call.lingerTimer != nil)
 		callSnap.answered = call.answered
-		callSnap.startTime = call.session.StartTime
-		callSnap.answerTime = call.session.AnswerTime
+		callSnap.startTime = call.session.GetStartTime()
+		callSnap.answerTime = call.session.GetAnswerTime()
 		callSnap.streamStartProgSec = call.streamStartProgressSec
 		if call.dialog != nil {
 			callSnap.callID = call.dialog.CallID()
@@ -849,6 +853,6 @@ func (s *BridgeService) GetStreamDebugInfo(id string) (StreamDebugInfo, bool) {
 		}
 	}
 
-	info := buildStreamDebugInfo(player, ingStats, hasIngress, discoveredCodecs, callSnap)
+	info := buildStreamDebugInfo(&playerCopy, ingStats, hasIngress, discoveredCodecs, callSnap)
 	return info, true
 }

@@ -329,7 +329,25 @@ func (a *AudioPath) flushPcmTailLocked() {
 		outCh = 2
 	}
 
-	a.appendTranscodedFrameLocked(encoded, framePlayAt, a.pcmTimestampUs+a.pcmAccumulatedTime.Microseconds(), outCh)
+	// The flush frame contains leftover samples from previous chunk(s).
+	// We must NOT consume the pending count of the incoming chunk that triggered this format switch.
+	consumed := 0
+	if a.chunksPendingCount > 1 {
+		consumed = a.chunksPendingCount - 1
+		a.chunksPendingCount = 1
+	}
+
+	a.ready = append(a.ready, ReadyFrame{
+		Payload:        encoded,
+		PlayAt:         framePlayAt,
+		TimestampUs:    a.pcmTimestampUs + a.pcmAccumulatedTime.Microseconds(),
+		Passthrough:    false,
+		Codec:          a.codec,
+		SampleRate:     a.codec.SampleRate(),
+		Channels:       outCh,
+		ChunksConsumed: consumed,
+	})
+	a.transcodePackets++
 }
 
 func (a *AudioPath) appendTranscodedFrameLocked(encoded []byte, playAt time.Time, timestampUs int64, outCh int) {

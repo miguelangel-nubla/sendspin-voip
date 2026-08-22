@@ -131,3 +131,31 @@ func TestToDomainPlayerConfigs_RejectsUnknownCodec(t *testing.T) {
 		t.Error("expected an unsupported codec to be rejected")
 	}
 }
+
+func TestLoad_ExplicitPathNotFound(t *testing.T) {
+	_, err := Load("/non/existent/path/to/config.yaml")
+	if err == nil {
+		t.Error("expected error when explicit config path does not exist, got nil")
+	}
+}
+
+func TestToDomainPlayerConfigs_DefaultVolumeZero(t *testing.T) {
+	zero := 0
+	cfg := DefaultConfig()
+	cfg.Players = []PlayerConfig{
+		{ID: "p1", SIPTarget: "sip:101@192.168.1.50", DefaultVolume: &zero},
+		{ID: "p2", SIPTarget: "sip:102@192.168.1.50"}, // unset -> defaults to 100
+	}
+
+	domainPlayers, err := cfg.ToDomainPlayerConfigs()
+	if err != nil {
+		t.Fatalf("ToDomainPlayerConfigs failed: %v", err)
+	}
+
+	if domainPlayers[0].DefaultVolume != 0 {
+		t.Errorf("expected p1 default volume 0, got %d", domainPlayers[0].DefaultVolume)
+	}
+	if domainPlayers[1].DefaultVolume != 100 {
+		t.Errorf("expected p2 default volume 100, got %d", domainPlayers[1].DefaultVolume)
+	}
+}

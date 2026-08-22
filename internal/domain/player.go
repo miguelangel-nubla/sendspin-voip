@@ -104,7 +104,7 @@ func NewPlayer(cfg PlayerConfig) (*Player, error) {
 	}
 	// Empty Codec means "auto": use downstream discovery order (no forced preference).
 	cfg.AutoAnswer = cmp.Or(cfg.AutoAnswer, AutoAnswerDefault)
-	cfg.DefaultVolume = cmp.Or(ClampVolume(cfg.DefaultVolume), 100)
+	cfg.DefaultVolume = ClampVolume(cfg.DefaultVolume)
 
 	return &Player{
 		Config:  cfg,

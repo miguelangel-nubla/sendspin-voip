@@ -2,6 +2,7 @@ package sip
 
 import (
 	"cmp"
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -114,7 +115,7 @@ func ParseRemoteSDP(sdpRaw string, fallbackHost string) (*net.UDPAddr, domain.Co
 
 	// 2. Determine Remote Port and Codec from Media Descriptions
 	var remotePort int
-	selectedCodec := domain.CodecPCMU
+	var selectedCodec domain.Codec
 
 	for _, m := range sd.MediaDescriptions {
 		if strings.EqualFold(m.MediaName.Media, "audio") {
@@ -151,12 +152,18 @@ func ParseRemoteSDP(sdpRaw string, fallbackHost string) (*net.UDPAddr, domain.Co
 		return nil, "", fmt.Errorf("no audio media port found in remote SDP")
 	}
 
+	if selectedCodec == "" {
+		return nil, "", fmt.Errorf("no supported audio codec found in remote SDP answer")
+	}
+
 	ip := net.ParseIP(remoteIP)
 	if ip == nil {
-		// Try resolving DNS if it's a hostname
-		ips, err := net.LookupIP(remoteIP)
+		// Try resolving DNS if it's a hostname with 2-second timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", remoteIP)
 		if err != nil || len(ips) == 0 {
-			return nil, "", fmt.Errorf("invalid or unresolvable remote RTP IP: %s", remoteIP)
+			return nil, "", fmt.Errorf("invalid or unresolvable remote RTP IP %q: %w", remoteIP, err)
 		}
 		ip = ips[0]
 	}
