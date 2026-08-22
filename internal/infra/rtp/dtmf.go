@@ -51,7 +51,7 @@ func ParseDTMFPayload(payload []byte) (*DTMFEvent, error) {
 
 	digit, ok := EventToDigit(eventCode)
 	if !ok {
-		digit = fmt.Sprintf("UNKNOWN(%d)", eventCode)
+		return nil, fmt.Errorf("unrecognized RFC 4733 event code: %d", eventCode)
 	}
 
 	return &DTMFEvent{

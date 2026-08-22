@@ -463,21 +463,22 @@ func (t *Transmitter) DrainAndClose(drainDelay time.Duration) error {
 		t.stopped = true
 		t.mu.Unlock()
 		close(t.stopChan)
+
+		t.mu.Lock()
+		if t.conn != nil {
+			_ = t.conn.Close()
+		}
+		port := t.localPort
+		pool := t.portPool
+		t.localPort = 0
+		t.mu.Unlock()
+
+		t.wg.Wait()
+
+		if pool != nil && port > 0 {
+			pool.Release(port)
+		}
 	})
-
-	t.mu.Lock()
-	if t.conn != nil {
-		_ = t.conn.Close()
-	}
-	port := t.localPort
-	pool := t.portPool
-	t.mu.Unlock()
-
-	t.wg.Wait()
-
-	if pool != nil && port > 0 {
-		pool.Release(port)
-	}
 
 	if drainDelay > 0 {
 		time.Sleep(drainDelay)

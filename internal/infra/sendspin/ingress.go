@@ -85,17 +85,15 @@ func (w *playerWorker) sendSynchronizedState(client *protocol.Client) {
 func (w *playerWorker) setVolume(client *protocol.Client, vol int) {
 	w.statsMu.Lock()
 	w.state.volume = vol
-	muted := w.state.isMuted
 	w.statsMu.Unlock()
-	_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+	w.sendSynchronizedState(client)
 }
 
 func (w *playerWorker) setMuted(client *protocol.Client, muted bool) {
 	w.statsMu.Lock()
 	w.state.isMuted = muted
-	vol := w.state.volume
 	w.statsMu.Unlock()
-	_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+	w.sendSynchronizedState(client)
 }
 
 func (w *playerWorker) setFormatsAndCodecs(offered []string, exposed []string) {

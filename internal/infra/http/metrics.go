@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"runtime"
@@ -65,79 +66,80 @@ func WritePrometheusMetrics(
 	fmt.Fprintf(w, "# TYPE sendspin_voip_players_active gauge\n")
 	fmt.Fprintf(w, "sendspin_voip_players_active %d\n\n", activePlayers)
 
-	// Per-Player Metrics
-	fmt.Fprintf(w, "# HELP sendspin_voip_player_active Whether the player stream is active (1 = active, 0 = idle).\n")
-	fmt.Fprintf(w, "# TYPE sendspin_voip_player_active gauge\n")
+	var (
+		bufActive bytes.Buffer
+		bufVolume bytes.Buffer
+		bufMuted  bytes.Buffer
+		bufPkts   bytes.Buffer
+		bufBytes  bytes.Buffer
+		bufChunks bytes.Buffer
+	)
+
 	for id, stream := range streams {
+		escID := escapeLabelValue(id)
+		escName := escapeLabelValue(stream.Name)
+
 		active := 0
 		if stream.IsActive() {
 			active = 1
 		}
-		fmt.Fprintf(w, "sendspin_voip_player_active{player_id=\"%s\",name=\"%s\"} %d\n",
-			escapeLabelValue(id), escapeLabelValue(stream.Name), active)
-	}
-	fmt.Fprintln(w)
+		fmt.Fprintf(&bufActive, "sendspin_voip_player_active{player_id=\"%s\",name=\"%s\"} %d\n", escID, escName, active)
+		fmt.Fprintf(&bufVolume, "sendspin_voip_player_volume{player_id=\"%s\"} %d\n", escID, stream.Volume)
 
-	fmt.Fprintf(w, "# HELP sendspin_voip_player_volume Player volume level (0-100).\n")
-	fmt.Fprintf(w, "# TYPE sendspin_voip_player_volume gauge\n")
-	for id, stream := range streams {
-		fmt.Fprintf(w, "sendspin_voip_player_volume{player_id=\"%s\"} %d\n", escapeLabelValue(id), stream.Volume)
-	}
-	fmt.Fprintln(w)
-
-	fmt.Fprintf(w, "# HELP sendspin_voip_player_muted Whether player audio is muted (1 = muted, 0 = unmuted).\n")
-	fmt.Fprintf(w, "# TYPE sendspin_voip_player_muted gauge\n")
-	for id, stream := range streams {
 		muted := 0
 		if stream.Muted {
 			muted = 1
 		}
-		fmt.Fprintf(w, "sendspin_voip_player_muted{player_id=\"%s\"} %d\n", escapeLabelValue(id), muted)
-	}
-	fmt.Fprintln(w)
+		fmt.Fprintf(&bufMuted, "sendspin_voip_player_muted{player_id=\"%s\"} %d\n", escID, muted)
 
-	fmt.Fprintf(w, "# HELP sendspin_voip_player_packets_sent_total Total RTP packets sent downstream.\n")
-	fmt.Fprintf(w, "# TYPE sendspin_voip_player_packets_sent_total counter\n")
-	for id, stream := range streams {
-		var pkts uint64
+		var pkts, bytesSent uint64
 		codec := stream.AudioPath.EgressCodec
 		for _, c := range stream.Consumers {
 			pkts += c.PacketsSent
+			bytesSent += c.BytesSent
 			if codec == "" {
 				codec = c.ActiveCodec
 			}
 		}
-		fmt.Fprintf(w, "sendspin_voip_player_packets_sent_total{player_id=\"%s\",codec=\"%s\"} %d\n",
-			escapeLabelValue(id), escapeLabelValue(codec), pkts)
-	}
-	fmt.Fprintln(w)
+		escCodec := escapeLabelValue(codec)
+		fmt.Fprintf(&bufPkts, "sendspin_voip_player_packets_sent_total{player_id=\"%s\",codec=\"%s\"} %d\n", escID, escCodec, pkts)
+		fmt.Fprintf(&bufBytes, "sendspin_voip_player_bytes_sent_total{player_id=\"%s\",codec=\"%s\"} %d\n", escID, escCodec, bytesSent)
 
-	fmt.Fprintf(w, "# HELP sendspin_voip_player_bytes_sent_total Total RTP bytes sent downstream.\n")
-	fmt.Fprintf(w, "# TYPE sendspin_voip_player_bytes_sent_total counter\n")
-	for id, stream := range streams {
-		var bytes uint64
-		codec := stream.AudioPath.EgressCodec
-		for _, c := range stream.Consumers {
-			bytes += c.BytesSent
-			if codec == "" {
-				codec = c.ActiveCodec
-			}
-		}
-		fmt.Fprintf(w, "sendspin_voip_player_bytes_sent_total{player_id=\"%s\",codec=\"%s\"} %d\n",
-			escapeLabelValue(id), escapeLabelValue(codec), bytes)
-	}
-	fmt.Fprintln(w)
-
-	fmt.Fprintf(w, "# HELP sendspin_voip_player_chunks_received_total Total Sendspin chunks received upstream.\n")
-	fmt.Fprintf(w, "# TYPE sendspin_voip_player_chunks_received_total counter\n")
-	for id, stream := range streams {
 		var chunks uint64
 		for _, p := range stream.Producers {
 			chunks += p.ChunksReceived
 		}
-		fmt.Fprintf(w, "sendspin_voip_player_chunks_received_total{player_id=\"%s\"} %d\n",
-			escapeLabelValue(id), chunks)
+		fmt.Fprintf(&bufChunks, "sendspin_voip_player_chunks_received_total{player_id=\"%s\"} %d\n", escID, chunks)
 	}
+
+	fmt.Fprintf(w, "# HELP sendspin_voip_player_active Whether the player stream is active (1 = active, 0 = idle).\n")
+	fmt.Fprintf(w, "# TYPE sendspin_voip_player_active gauge\n")
+	w.Write(bufActive.Bytes())
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "# HELP sendspin_voip_player_volume Player volume level (0-100).\n")
+	fmt.Fprintf(w, "# TYPE sendspin_voip_player_volume gauge\n")
+	w.Write(bufVolume.Bytes())
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "# HELP sendspin_voip_player_muted Whether player audio is muted (1 = muted, 0 = unmuted).\n")
+	fmt.Fprintf(w, "# TYPE sendspin_voip_player_muted gauge\n")
+	w.Write(bufMuted.Bytes())
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "# HELP sendspin_voip_player_packets_sent_total Total RTP packets sent downstream.\n")
+	fmt.Fprintf(w, "# TYPE sendspin_voip_player_packets_sent_total counter\n")
+	w.Write(bufPkts.Bytes())
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "# HELP sendspin_voip_player_bytes_sent_total Total RTP bytes sent downstream.\n")
+	fmt.Fprintf(w, "# TYPE sendspin_voip_player_bytes_sent_total counter\n")
+	w.Write(bufBytes.Bytes())
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "# HELP sendspin_voip_player_chunks_received_total Total Sendspin chunks received upstream.\n")
+	fmt.Fprintf(w, "# TYPE sendspin_voip_player_chunks_received_total counter\n")
+	w.Write(bufChunks.Bytes())
 	fmt.Fprintln(w)
 
 	// Runtime metrics

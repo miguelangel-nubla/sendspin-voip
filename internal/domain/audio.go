@@ -96,51 +96,159 @@ func NormalizeSIPTarget(target string) string {
 	return "sip:" + t
 }
 
+type codecInfo struct {
+	payloadType     uint8
+	sampleRate      int
+	rtpClockRate    uint32
+	displayName     string
+	defaultBitrate  int
+	defaultChannels int
+	fullName        string
+	sdpEncodingName string
+	longDescription string
+}
+
+var codecTable = map[Codec]codecInfo{
+	CodecOpus: {
+		payloadType:     96,
+		sampleRate:      48000,
+		rtpClockRate:    48000,
+		displayName:     "OPUS",
+		defaultBitrate:  128,
+		defaultChannels: 2,
+		fullName:        "Opus Interactive Audio",
+		sdpEncodingName: "opus/48000/2",
+		longDescription: "High fidelity multi-room audio with zero-copy passthrough when volume is 100%",
+	},
+	CodecL16: {
+		payloadType:     97,
+		sampleRate:      48000,
+		rtpClockRate:    48000,
+		displayName:     "L16",
+		defaultBitrate:  1536,
+		defaultChannels: 2,
+		fullName:        "L16 Linear PCM (Uncompressed)",
+		sdpEncodingName: "L16/48000/1",
+		longDescription: "Studio master uncompressed linear PCM audio streaming",
+	},
+	CodecG722: {
+		payloadType:     9,
+		sampleRate:      16000,
+		rtpClockRate:    8000,
+		displayName:     "G.722",
+		defaultBitrate:  64,
+		defaultChannels: 1,
+		fullName:        "G.722 HD Voice",
+		sdpEncodingName: "G722/8000",
+		longDescription: "Wideband HD VoIP codec with crystal clear speech synthesis",
+	},
+	CodecPCMU: {
+		payloadType:     0,
+		sampleRate:      8000,
+		rtpClockRate:    8000,
+		displayName:     "G.711u",
+		defaultBitrate:  64,
+		defaultChannels: 1,
+		fullName:        "G.711 µ-law (PCMU)",
+		sdpEncodingName: "PCMU/8000",
+		longDescription: "Universal standard telephony codec (North America/Japan standard)",
+	},
+	CodecPCMA: {
+		payloadType:     8,
+		sampleRate:      8000,
+		rtpClockRate:    8000,
+		displayName:     "G.711a",
+		defaultBitrate:  64,
+		defaultChannels: 1,
+		fullName:        "G.711 A-law (PCMA)",
+		sdpEncodingName: "PCMA/8000",
+		longDescription: "Universal standard telephony codec (International/European standard)",
+	},
+}
+
 // PayloadType returns the standard RFC RTP payload type for the codec.
 func (c Codec) PayloadType() uint8 {
-	switch c {
-	case CodecPCMU:
-		return 0
-	case CodecPCMA:
-		return 8
-	case CodecG722:
-		return 9
-	case CodecOpus:
-		return 96
-	case CodecL16:
-		return 97
-	default:
-		return 0
+	if info, ok := codecTable[c]; ok {
+		return info.payloadType
 	}
+	return 0
 }
 
 // SampleRate returns the actual audio sample rate required by the encoder.
 func (c Codec) SampleRate() int {
-	switch c {
-	case CodecPCMU, CodecPCMA:
-		return 8000
-	case CodecG722:
-		return 16000
-	case CodecOpus, CodecL16:
-		return 48000
-	default:
-		return 8000
+	if info, ok := codecTable[c]; ok {
+		return info.sampleRate
 	}
+	return 8000
 }
 
 // RTPClockRate returns the clock rate advertised in SDP and used for RTP timestamps.
 // Note: G.722 uses 8000 in RFC 3551 for historic reasons even though it samples at 16000.
 func (c Codec) RTPClockRate() uint32 {
-	switch c {
-	case CodecPCMU, CodecPCMA:
-		return 8000
-	case CodecG722:
-		return 8000 // RFC 3551 legacy clock rate
-	case CodecOpus, CodecL16:
-		return 48000
-	default:
-		return 8000
+	if info, ok := codecTable[c]; ok {
+		return info.rtpClockRate
 	}
+	return 8000
+}
+
+// DisplayName returns an uppercase presentation name for the codec.
+func (c Codec) DisplayName() string {
+	if info, ok := codecTable[c]; ok {
+		return info.displayName
+	}
+	return strings.ToUpper(string(c))
+}
+
+// DefaultBitrateKbps returns the standard expected bitrate in kbps.
+func (c Codec) DefaultBitrateKbps() int {
+	if info, ok := codecTable[c]; ok {
+		return info.defaultBitrate
+	}
+	return 64
+}
+
+// DefaultChannels returns the standard channel layout count.
+func (c Codec) DefaultChannels() int {
+	if info, ok := codecTable[c]; ok {
+		return info.defaultChannels
+	}
+	return 1
+}
+
+// FormatDescription returns a human-readable stream description, e.g. "G.722 16000Hz 1ch (64 kbps)".
+func (c Codec) FormatDescription(channels, bitrateKbps int) string {
+	channels = cmp.Or(channels, c.DefaultChannels())
+	bitrateKbps = cmp.Or(bitrateKbps, c.DefaultBitrateKbps())
+	return fmt.Sprintf("%s %dHz %dch (%d kbps)", c.DisplayName(), c.SampleRate(), channels, bitrateKbps)
+}
+
+// SDPDescription returns SDP summary string, e.g. "OPUS (pt=96, clock=48000Hz)".
+func (c Codec) SDPDescription() string {
+	return fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(c)), c.PayloadType(), c.RTPClockRate())
+}
+
+// FullName returns the expanded title for the codec used in documentation and web UI.
+func (c Codec) FullName() string {
+	if info, ok := codecTable[c]; ok {
+		return info.fullName
+	}
+	return c.DisplayName()
+}
+
+// SDPEncodingName returns the standard RFC 4566 / 3551 rtpmap encoding parameter (e.g. "opus/48000/2").
+func (c Codec) SDPEncodingName() string {
+	if info, ok := codecTable[c]; ok {
+		return info.sdpEncodingName
+	}
+	return string(c)
+}
+
+// LongDescription returns a descriptive summary of the codec capabilities.
+func (c Codec) LongDescription() string {
+	if info, ok := codecTable[c]; ok {
+		return info.longDescription
+	}
+	return ""
 }
 
 // NormalizeChannels clamps an announced channel count to a valid layout (1 or 2),
@@ -195,106 +303,4 @@ type AudioChunk struct {
 	SampleRate int       // Source sample rate (e.g. 44100, 48000)
 	Channels   int       // Source channels (e.g. 1, 2)
 	BitDepth   int       // Source bit depth (e.g. 16, 24)
-}
-
-// DisplayName returns an uppercase presentation name for the codec.
-func (c Codec) DisplayName() string {
-	switch c {
-	case CodecG722:
-		return "G.722"
-	case CodecPCMU:
-		return "G.711u"
-	case CodecPCMA:
-		return "G.711a"
-	default:
-		return strings.ToUpper(string(c))
-	}
-}
-
-// DefaultBitrateKbps returns the standard expected bitrate in kbps.
-func (c Codec) DefaultBitrateKbps() int {
-	switch c {
-	case CodecOpus:
-		return 128
-	case CodecL16:
-		return 1536
-	default:
-		return 64
-	}
-}
-
-// DefaultChannels returns the standard channel layout count.
-func (c Codec) DefaultChannels() int {
-	switch c {
-	case CodecOpus, CodecL16:
-		return 2
-	default:
-		return 1
-	}
-}
-
-// FormatDescription returns a human-readable stream description, e.g. "G.722 16000Hz 1ch (64 kbps)".
-func (c Codec) FormatDescription(channels, bitrateKbps int) string {
-	channels = cmp.Or(channels, c.DefaultChannels())
-	bitrateKbps = cmp.Or(bitrateKbps, c.DefaultBitrateKbps())
-	return fmt.Sprintf("%s %dHz %dch (%d kbps)", c.DisplayName(), c.SampleRate(), channels, bitrateKbps)
-}
-
-// SDPDescription returns SDP summary string, e.g. "OPUS (pt=96, clock=48000Hz)".
-func (c Codec) SDPDescription() string {
-	return fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(c)), c.PayloadType(), c.RTPClockRate())
-}
-
-// FullName returns the expanded title for the codec used in documentation and web UI.
-func (c Codec) FullName() string {
-	switch c {
-	case CodecOpus:
-		return "Opus Interactive Audio"
-	case CodecL16:
-		return "L16 Linear PCM (Uncompressed)"
-	case CodecG722:
-		return "G.722 HD Voice"
-	case CodecPCMU:
-		return "G.711 µ-law (PCMU)"
-	case CodecPCMA:
-		return "G.711 A-law (PCMA)"
-	default:
-		return c.DisplayName()
-	}
-}
-
-// SDPEncodingName returns the standard RFC 4566 / 3551 rtpmap encoding parameter (e.g. "opus/48000/2").
-func (c Codec) SDPEncodingName() string {
-	switch c {
-	case CodecOpus:
-		return "opus/48000/2"
-	case CodecL16:
-		return "L16/48000/1"
-	case CodecG722:
-		return "G722/8000"
-	case CodecPCMU:
-		return "PCMU/8000"
-	case CodecPCMA:
-		return "PCMA/8000"
-	default:
-		return string(c)
-	}
-}
-
-// LongDescription returns a descriptive summary of the codec capabilities.
-func (c Codec) LongDescription() string {
-	switch c {
-	case CodecOpus:
-		return "High fidelity multi-room audio with zero-copy passthrough when volume is 100%"
-	case CodecL16:
-		return "Studio master uncompressed linear PCM audio streaming"
-	case CodecG722:
-		return "Wideband HD VoIP codec with crystal clear speech synthesis"
-	case CodecPCMU:
-		return "Universal standard telephony codec (North America/Japan standard)"
-	case CodecPCMA:
-		return "Universal standard telephony codec (International/European standard)"
-	default:
-		return ""
-	}
 }
