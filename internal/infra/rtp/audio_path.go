@@ -485,7 +485,7 @@ func (a *AudioPath) buildPathDiagnosticsLocked() (string, []string) {
 
 	inLabel := fmt.Sprintf("%s %dHz %dch", strings.ToUpper(inCodec), inRate, inChannels)
 	outLabel := fmt.Sprintf("%s %dHz %dch", strings.ToUpper(string(a.codec)), a.codec.SampleRate(), outCh)
-	volLabel := volumeStageLabel(a.pathVolumePercent)
+	volLabel := domain.FormatVolumeGain(a.pathVolumePercent, false)
 
 	if a.pathMode == "opus_passthrough" {
 		stages := []string{
@@ -528,15 +528,4 @@ func (a *AudioPath) buildPathDiagnosticsLocked() (string, []string) {
 	stages = append(stages, "RTP "+outLabel)
 	summary := inLabel + " → transcode (" + volLabel + ") → RTP " + strings.ToUpper(string(a.codec))
 	return summary, stages
-}
-
-func volumeStageLabel(vol int) string {
-	if vol <= 0 {
-		return "volume mute"
-	}
-	if vol >= 100 {
-		return "volume 100% (0 dB)"
-	}
-	db := float64(vol)/100.0*60.0 - 60.0
-	return fmt.Sprintf("volume %d%% (%.1f dB)", vol, db)
 }

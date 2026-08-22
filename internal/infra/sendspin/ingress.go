@@ -16,14 +16,6 @@ import (
 	sendspinsync "github.com/Sendspin/sendspin-go/pkg/sync"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/app"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
-	"github.com/pion/opus"
-)
-
-const (
-	// maxOpusFrameSamples is the largest Opus frame per channel: 120 ms at 48 kHz.
-	maxOpusFrameSamples = 5760
-	// maxOpusChannels is the widest layout the Opus decoder is built for.
-	maxOpusChannels = 2
 )
 
 // IngressConfig defines Sendspin ingress adapter settings.
@@ -501,14 +493,6 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		var currentChannels = primaryChannels
 		var currentBitDepth = primaryBitDepth
 
-		opusDecoder, decErr := opus.NewDecoderWithOutput(48000, maxOpusChannels)
-		opusDecoderReady := decErr == nil
-		if decErr != nil {
-			ing.logger.Warn("Failed to create Opus decoder", "player_id", w.cfg.ID, "err", decErr)
-		}
-		// Room for the largest Opus frame (120 ms at 48 kHz) in stereo.
-		pcm16Buf := make([]int16, maxOpusFrameSamples*maxOpusChannels)
-
 		done := client.Done()
 		_ = client.SendTimeSync(time.Now().UnixMicro())
 
@@ -557,10 +541,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					if currentCodec == "" {
 						currentCodec = "pcm"
 					}
-					// Normalize the announced format up front. A server that omits
-					// (or mis-reports) these leaves every downstream consumer —
-					// including the fixed-size Opus decode buffer below — working
-					// from a bogus frame geometry.
+					// Normalize the announced format up front.
 					currentRate = startMsg.Player.SampleRate
 					if currentRate <= 0 {
 						currentRate = primaryRate
@@ -578,14 +559,6 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				w.currentBitDepth = currentBitDepth
 				w.statsMu.Unlock()
 
-				if dec, err := opus.NewDecoderWithOutput(48000, currentChannels); err == nil {
-					opusDecoder = dec
-					opusDecoderReady = true
-				} else {
-					opusDecoderReady = false
-					ing.logger.Warn("Failed to build Opus decoder for stream format",
-						"player_id", w.cfg.ID, "channels", currentChannels, "err", err)
-				}
 				currentMeta.ProgressUpdated = time.Now()
 				w.statsMu.Lock()
 				w.currentMeta = currentMeta
@@ -654,8 +627,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 
 				playAt := resolvePlayAt(w, chunk.Timestamp)
 				audioChunk := decodeIncomingAudioChunk(
-					chunk, currentCodec, currentRate, currentChannels, currentBitDepth,
-					playAt, &opusDecoder, opusDecoderReady, pcm16Buf,
+					chunk, currentCodec, currentRate, currentChannels, currentBitDepth, playAt,
 				)
 				w.handler.OnAudioChunk(w.cfg.ID, audioChunk)
 			}
@@ -739,30 +711,12 @@ func decodeIncomingAudioChunk(
 	currentCodec string,
 	currentRate, currentChannels, currentBitDepth int,
 	playAt time.Time,
-	opusDecoder *opus.Decoder,
-	opusDecoderReady bool,
-	pcm16Buf []int16,
 ) domain.AudioChunk {
 	if currentCodec == "opus" {
-		var samples []int32
-		if opusDecoderReady && opusDecoder != nil {
-			n, err := opusDecoder.DecodeToInt16(chunk.Data, pcm16Buf)
-			if err == nil && n > 0 {
-				total := n * currentChannels
-				if total > len(pcm16Buf) {
-					total = len(pcm16Buf)
-				}
-				samples = make([]int32, total)
-				for i := 0; i < total; i++ {
-					samples[i] = int32(pcm16Buf[i])
-				}
-			}
-		}
 		return domain.AudioChunk{
 			Timestamp:  chunk.Timestamp,
 			PlayAt:     playAt,
 			OpusData:   chunk.Data,
-			Samples:    samples,
 			SampleRate: 48000,
 			Channels:   currentChannels,
 			BitDepth:   16,

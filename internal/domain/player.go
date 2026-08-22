@@ -70,6 +70,18 @@ func ClampVolume(v int) int {
 	return v
 }
 
+// FormatVolumeGain formats a volume percentage (and mute status) into a descriptive string with dB equivalent.
+func FormatVolumeGain(volumePercent int, muted bool) string {
+	if muted || volumePercent <= 0 {
+		return "volume mute"
+	}
+	if volumePercent >= 100 {
+		return "volume 100% (0 dB)"
+	}
+	db := (float64(volumePercent)/100.0)*60.0 - 60.0
+	return fmt.Sprintf("volume %d%% (%.1f dB)", volumePercent, db)
+}
+
 // EffectiveVolume returns 0 if muted, otherwise the current volume percentage.
 func (p *Player) EffectiveVolume() int {
 	if p.IsMuted {

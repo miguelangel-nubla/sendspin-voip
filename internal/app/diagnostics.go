@@ -225,7 +225,7 @@ func buildConsumerAndAudioPathInfo(
 	ap.ReadyStartSec = trackProgSec + readyStartOffset
 	ap.ReadyEndSec = trackProgSec + readyEndOffset
 
-	volDesc := volumeStageForDebug(ap.VolumePercent, muted)
+	volDesc := domain.FormatVolumeGain(ap.VolumePercent, muted)
 
 	switch {
 	case !call.answered:
@@ -265,17 +265,6 @@ func buildConsumerAndAudioPathInfo(
 	}
 
 	return consumer, ap, state
-}
-
-func volumeStageForDebug(volumePercent int, muted bool) string {
-	if muted || volumePercent <= 0 {
-		return "volume mute"
-	}
-	if volumePercent >= 100 {
-		return "volume 100% (0 dB)"
-	}
-	db := (float64(volumePercent)/100.0)*60.0 - 60.0
-	return fmt.Sprintf("volume %d%% (%.0f dB)", volumePercent, db)
 }
 
 func calcTimelineOffsets(now time.Time, start, end time.Time, chunkCount int) (float64, float64) {

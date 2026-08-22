@@ -227,18 +227,6 @@ func (u *UpstreamPlayer) Clear() {
 	u.readIdx = 0
 }
 
-// Timestamps returns the timestamps in microseconds of the oldest and newest unplayed raw chunks.
-func (u *UpstreamPlayer) Timestamps() (firstUs int64, lastUs int64, count int) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	n := len(u.chunks)
-	if n == 0 {
-		return 0, 0, 0
-	}
-	return u.chunks[0].Timestamp, u.chunks[n-1].Timestamp, n
-}
-
 // PlayAtBounds returns the wall-clock PlayAt timestamps of the oldest and newest unplayed raw chunks.
 func (u *UpstreamPlayer) PlayAtBounds() (oldest, newest time.Time, count int) {
 	u.mu.Lock()

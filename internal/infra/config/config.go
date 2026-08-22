@@ -349,9 +349,3 @@ func (c *AppConfig) ToBridgeConfig() app.BridgeConfig {
 		ConflictPolicy:    c.Bridge.ConflictPolicy,
 	}
 }
-
-// EnsureDir creates parent directory if not existing.
-func EnsureDir(path string) error {
-	dir := filepath.Dir(path)
-	return os.MkdirAll(dir, 0755)
-}
