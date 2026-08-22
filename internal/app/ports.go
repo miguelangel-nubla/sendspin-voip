@@ -237,6 +237,8 @@ type RTPSession interface {
 	PushAudio(chunk domain.AudioChunk, volumePercent int) error
 	// ClearBuffer flushes all stages on seek / stream clear.
 	ClearBuffer()
+	// SetDTMFHandler sets a callback for incoming RFC 2833 / RFC 4733 DTMF digits.
+	SetDTMFHandler(handler func(digit string))
 	// DrainAndClose waits for drainDelay then closes the RTP socket.
 	DrainAndClose(drainDelay time.Duration) error
 	// Stats returns packet and byte transmission counters.
@@ -260,8 +262,15 @@ type PlayerIngressPort interface {
 	// UnregisterPlayer stops and disconnects a virtual Sendspin player client.
 	UnregisterPlayer(playerID string) error
 	// SendStopToUpstream sends a stop command to Music Assistant for the given player.
-	// Called when the remote phone hangs up (or the call is preempted) to stop the upstream stream.
 	SendStopToUpstream(playerID string)
+	// SendNextToUpstream sends a next track command to Music Assistant.
+	SendNextToUpstream(playerID string)
+	// SendPlayPauseToUpstream sends a play/pause toggle command to Music Assistant.
+	SendPlayPauseToUpstream(playerID string)
+	// SendVolumeToUpstream sends a volume change command to Music Assistant.
+	SendVolumeToUpstream(playerID string, volume int)
+	// SendMuteToUpstream sends a mute change command to Music Assistant.
+	SendMuteToUpstream(playerID string, muted bool)
 	// GetPlayerStats retrieves current ingress stats and metadata for a player.
 	GetPlayerStats(playerID string) (IngressPlayerStats, bool)
 	// StopAll disconnects all virtual players.

@@ -96,6 +96,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/codecs", s.handleAPICodecs)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 
+	// Health and Readiness probes (Kubernetes / Docker)
+	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/livez", s.handleHealthz)
+	mux.HandleFunc("/readyz", s.handleReadyz)
+
 	// Profiling — disabled by default (enable via http.enable_pprof)
 	if s.config.EnablePprof {
 		mux.HandleFunc("/debug/pprof/", pprof.Index)
@@ -114,6 +119,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Bypass token verification for container health check endpoints
+		if r.URL.Path == "/healthz" || r.URL.Path == "/livez" || r.URL.Path == "/readyz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		provided := r.URL.Query().Get("token")
 		if provided == "" {
 			auth := r.Header.Get("Authorization")
@@ -375,4 +386,46 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		streams,
 	)
 }
+
+// handleHealthz responds with basic process liveness.
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":     "ok",
+		"uptime_sec": time.Since(s.startTime).Seconds(),
+		"version":    s.config.Version,
+	})
+}
+
+// handleReadyz checks whether SIP and Bridge services are operational.
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var sipStatus app.SIPStatus
+	if s.sipCaller != nil {
+		sipStatus = s.sipCaller.RegistrationStatus()
+	}
+
+	ready := true
+	if strings.EqualFold(sipStatus.Mode, "pbx") && !sipStatus.Registered {
+		ready = false
+	}
+
+	if !ready {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":     "not_ready",
+			"sip_status": sipStatus,
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":     "ready",
+		"sip_status": sipStatus,
+	})
+}
+
 

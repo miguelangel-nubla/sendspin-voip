@@ -351,9 +351,47 @@ func BuildSupportedFormatsForCodecs(codecs []domain.Codec, preferred domain.Code
 }
 
 // SendStopToUpstream sends a stop command to Music Assistant for the given player.
-// This is called when the remote SIP phone hangs up (or the call is preempted), to
-// stop MA from continuing to stream since there is no longer anywhere to deliver it.
 func (ing *Ingress) SendStopToUpstream(playerID string) {
+	ing.sendCommandToUpstream(playerID, map[string]any{"command": "stop"})
+}
+
+// SendNextToUpstream sends a next track command to Music Assistant.
+func (ing *Ingress) SendNextToUpstream(playerID string) {
+	ing.sendCommandToUpstream(playerID, map[string]any{"command": "next"})
+}
+
+// SendPlayPauseToUpstream sends a play/pause toggle command to Music Assistant.
+func (ing *Ingress) SendPlayPauseToUpstream(playerID string) {
+	ing.sendCommandToUpstream(playerID, map[string]any{"command": "play_pause"})
+}
+
+// SendVolumeToUpstream sends a volume change command to Music Assistant.
+func (ing *Ingress) SendVolumeToUpstream(playerID string, volume int) {
+	ing.mu.Lock()
+	w, ok := ing.workers[playerID]
+	ing.mu.Unlock()
+	if !ok {
+		return
+	}
+	if client := w.getClient(); client != nil && client.IsConnected() {
+		w.setVolume(client, volume)
+	}
+}
+
+// SendMuteToUpstream sends a mute change command to Music Assistant.
+func (ing *Ingress) SendMuteToUpstream(playerID string, muted bool) {
+	ing.mu.Lock()
+	w, ok := ing.workers[playerID]
+	ing.mu.Unlock()
+	if !ok {
+		return
+	}
+	if client := w.getClient(); client != nil && client.IsConnected() {
+		w.setMuted(client, muted)
+	}
+}
+
+func (ing *Ingress) sendCommandToUpstream(playerID string, cmd map[string]any) {
 	ing.mu.Lock()
 	w, ok := ing.workers[playerID]
 	ing.mu.Unlock()
@@ -365,12 +403,12 @@ func (ing *Ingress) SendStopToUpstream(playerID string) {
 		return
 	}
 	payload := map[string]any{
-		"controller": map[string]any{"command": "stop"},
+		"controller": cmd,
 	}
 	if err := client.Send("client/command", payload); err != nil {
-		ing.logger.Warn("Failed to send stop to upstream Music Assistant", "player_id", playerID, "err", err)
+		ing.logger.Warn("Failed to send command to upstream Music Assistant", "player_id", playerID, "cmd", cmd, "err", err)
 	} else {
-		ing.logger.Info("Sent stop to upstream Music Assistant (call ended)", "player_id", playerID)
+		ing.logger.Info("Sent command to upstream Music Assistant", "player_id", playerID, "cmd", cmd)
 	}
 }
 

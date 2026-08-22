@@ -107,6 +107,11 @@ func (s *Session) SetVolume(volumePercent int) {
 	s.audioPath.SetVolume(volumePercent)
 }
 
+// SetDTMFHandler registers a callback on Transmitter for incoming DTMF digits.
+func (s *Session) SetDTMFHandler(handler func(digit string)) {
+	s.transmitter.SetDTMFHandler(handler)
+}
+
 // SetCodec updates target transmission codec across AudioPath and Transmitter.
 func (s *Session) SetCodec(codec domain.Codec) {
 	s.mu.Lock()

@@ -334,6 +334,9 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 	}
 
 	rtpSess.SetVolume(s.getEffectiveVolume(playerID))
+	rtpSess.SetDTMFHandler(func(digit string) {
+		s.handleDTMF(playerID, digit)
+	})
 
 	startProgSec := meta.ElapsedSeconds(true)
 	if startProgSec <= 0 {
@@ -417,6 +420,64 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 		// Local termination
 	}
 }
+
+// handleDTMF maps incoming keypad digits from the phone to Music Assistant controller commands.
+func (s *BridgeService) handleDTMF(playerID, digit string) {
+	s.logger.Info("Received inband DTMF digit from phone", "player_id", playerID, "digit", digit)
+	switch digit {
+	case "*":
+		// Stop / Pause upstream playback
+		s.ingress.SendStopToUpstream(playerID)
+	case "#":
+		// Next track
+		s.ingress.SendNextToUpstream(playerID)
+	case "0":
+		// Toggle mute
+		s.playersMu.Lock()
+		player, ok := s.players[playerID]
+		var newMuted bool
+		if ok {
+			player.IsMuted = !player.IsMuted
+			newMuted = player.IsMuted
+		}
+		s.playersMu.Unlock()
+		if ok {
+			s.ingress.SendMuteToUpstream(playerID, newMuted)
+		}
+	case "1", "2", "3", "4", "5", "6", "7", "8":
+		// Direct volume presets: 1=10%, ..., 8=80%
+		vol := int(digit[0]-'0') * 10
+		s.ingress.SendVolumeToUpstream(playerID, vol)
+	case "9":
+		// '9' sets maximum volume (100%)
+		s.ingress.SendVolumeToUpstream(playerID, 100)
+	case "A", "C":
+		// Volume Up (+10%)
+		s.playersMu.Lock()
+		player, ok := s.players[playerID]
+		newVol := 100
+		if ok {
+			newVol = min(100, player.Volume+10)
+		}
+		s.playersMu.Unlock()
+		if ok {
+			s.ingress.SendVolumeToUpstream(playerID, newVol)
+		}
+	case "B", "D":
+		// Volume Down (-10%)
+		s.playersMu.Lock()
+		player, ok := s.players[playerID]
+		newVol := 0
+		if ok {
+			newVol = max(0, player.Volume-10)
+		}
+		s.playersMu.Unlock()
+		if ok {
+			s.ingress.SendVolumeToUpstream(playerID, newVol)
+		}
+	}
+}
+
 
 // OnMetadata handles real-time track metadata updates from Music Assistant (e.g. gapless transitions).
 func (s *BridgeService) OnMetadata(playerID string, meta domain.StreamMetadata) {

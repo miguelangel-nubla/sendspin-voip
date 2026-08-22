@@ -40,6 +40,7 @@ type Transmitter struct {
 	lastSRCompactNTP   uint32
 	lastSRTime         time.Time
 	rtcpTickCounter    int
+	idleTickCounter    int
 
 	// Playout loop state
 	answered    bool
@@ -349,12 +350,30 @@ func (t *Transmitter) step() {
 
 	// 4. Pop the ready 20ms frame
 	frame, ok := t.audioPath.PopReady()
+	samplesPerPacket := uint32((codec.RTPClockRate() * 20) / 1000)
+
 	if !ok {
+		// During idle lingering / pause, emit a comfort noise / keep-alive frame every ~1 second (50 ticks)
+		t.mu.Lock()
+		t.idleTickCounter++
+		shouldEmitKeepalive := t.idleTickCounter >= 50
+		if shouldEmitKeepalive {
+			t.idleTickCounter = 0
+		}
+		t.mu.Unlock()
+
+		if shouldEmitKeepalive {
+			silencePayload := generateComfortNoise(codec)
+			_ = t.sendPacket(silencePayload, codec.PayloadType(), samplesPerPacket, false)
+		}
 		return
 	}
 
+	t.mu.Lock()
+	t.idleTickCounter = 0
+	t.mu.Unlock()
+
 	// 5. Build RFC 3550 RTP packet and transmit over UDP
-	samplesPerPacket := uint32((codec.RTPClockRate() * 20) / 1000)
 	if err := t.sendPacket(frame.Payload, codec.PayloadType(), samplesPerPacket, isMarker); err != nil {
 		t.logger.Debug("RTP transmit error", "err", err)
 	}
@@ -363,6 +382,34 @@ func (t *Transmitter) step() {
 		t.mu.Lock()
 		t.firstPkt = false
 		t.mu.Unlock()
+	}
+}
+
+// generateComfortNoise returns an RFC-compliant silence / comfort noise frame for the codec.
+func generateComfortNoise(codec domain.Codec) []byte {
+	switch codec {
+	case domain.CodecOpus:
+		// Opus 20ms DTX / comfort noise payload
+		return []byte{0xF8, 0xFF, 0xFE}
+	case domain.CodecPCMU:
+		// PCMU (mu-law) silence is 0xFF
+		buf := make([]byte, 160)
+		for i := range buf {
+			buf[i] = 0xFF
+		}
+		return buf
+	case domain.CodecPCMA:
+		// PCMA (A-law) silence is 0xD5
+		buf := make([]byte, 160)
+		for i := range buf {
+			buf[i] = 0xD5
+		}
+		return buf
+	case domain.CodecG722:
+		// G.722 16kHz mono (20ms = 160 bytes)
+		return make([]byte, 160)
+	default:
+		return make([]byte, 160)
 	}
 }
 

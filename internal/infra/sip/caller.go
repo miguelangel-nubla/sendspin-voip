@@ -144,6 +144,41 @@ func (c *Caller) Start(ctx context.Context) error {
 		_ = tx.Respond(res)
 	})
 
+	// Handle incoming in-dialog Re-INVITE requests (e.g. RFC 4028 session timer refresh)
+	server.OnInvite(func(req *sip.Request, tx sip.ServerTransaction) {
+		callIDHeader := req.CallID()
+		var callID string
+		if callIDHeader != nil {
+			callID = callIDHeader.Value()
+		}
+
+		c.mu.Lock()
+		dialog, exists := c.activeDialogs[callID]
+		c.mu.Unlock()
+
+		if !exists || dialog == nil {
+			res := sip.NewResponseFromRequest(req, 481, "Call/Transaction Does Not Exist", nil)
+			_ = tx.Respond(res)
+			return
+		}
+
+		// Re-INVITE session refresh: respond with 200 OK + active SDP
+		sdpAnswer, _ := BuildSDPOffer(c.localIP, dialog.localRTPPort, dialog.codec)
+		res := sip.NewResponseFromRequest(req, 200, "OK", []byte(sdpAnswer))
+		res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+		res.AppendHeader(sip.NewHeader("Supported", "timer"))
+		res.AppendHeader(sip.NewHeader("Session-Expires", "1800;refresher=uas"))
+		res.AppendHeader(&sip.ContactHeader{
+			Address: sip.Uri{
+				User: c.config.Username,
+				Host: c.localIP,
+				Port: c.config.LocalSIPPort,
+			},
+		})
+		_ = tx.Respond(res)
+		c.logger.Debug("Handled incoming SIP Re-INVITE session refresh", "call_id", callID)
+	})
+
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 
 	c.logger.Info("SIP client & server starting", "local_ip", c.localIP, "local_port", c.config.LocalSIPPort)
@@ -384,7 +419,12 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 	preset := cmp.Or(player.AutoAnswer, c.config.AutoAnswerPreset)
 	customHeader := cmp.Or(player.CustomAutoAnswerHeader, c.config.CustomAutoAnswerHeader)
 	headers := c.buildAutoAnswerHeaders(preset, customHeader)
-	headers = append(headers, sip.NewHeader("Content-Type", "application/sdp"))
+	headers = append(headers,
+		sip.NewHeader("Content-Type", "application/sdp"),
+		sip.NewHeader("Supported", "timer"),
+		sip.NewHeader("Session-Expires", "1800;refresher=uac"),
+		sip.NewHeader("Min-SE", "90"),
+	)
 
 	fromHdr := sip.FromHeader{
 		DisplayName: player.Name,
@@ -441,6 +481,7 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 		session:       dialogSession,
 		remoteRTPAddr: remoteRTP,
 		codec:         negotiatedCodec,
+		localRTPPort:  localRTPPort,
 		callID:        callID,
 		doneChan:      make(chan struct{}),
 	}
@@ -558,6 +599,7 @@ type DialogWrapper struct {
 	session       *sipgo.DialogClientSession
 	remoteRTPAddr *net.UDPAddr
 	codec         domain.Codec
+	localRTPPort  int
 	callID        string
 	onBye         func()
 	doneChan      chan struct{}

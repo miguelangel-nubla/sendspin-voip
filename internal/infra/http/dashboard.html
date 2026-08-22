@@ -825,10 +825,16 @@
 
       // Telemetry
       const telem = document.getElementById(`telem-${id}`);
+      const rttStr = cons.round_trip_time_ms && cons.round_trip_time_ms > 0 ? `${cons.round_trip_time_ms.toFixed(1)}ms` : (isPlaying ? '&lt;1ms' : '—');
+      const jitStr = cons.remote_jitter_ms && cons.remote_jitter_ms > 0 ? `${cons.remote_jitter_ms.toFixed(1)}ms` : (isPlaying ? '0ms' : '—');
+      const lossStr = cons.fraction_lost && cons.fraction_lost > 0 ? `${cons.fraction_lost.toFixed(1)}%` : (isPlaying ? '0%' : '—');
+
       telem.innerHTML = `
-        <span>Remote RTP: <strong style="color: #fff;">${cons.remote_rtp || 'Pending'}</strong></span>
-        <span>Local RTP: <strong style="color: #fff;">${cons.local_rtp || 'Auto'}</strong></span>
+        <span>Remote: <strong style="color: #fff;">${cons.remote_rtp || 'Pending'}</strong></span>
         <span>Packets: <strong style="color: #fff;">${(cons.packets_sent || 0).toLocaleString()}</strong></span>
+        <span>RTT: <strong style="color: var(--accent-cyan);">${rttStr}</strong></span>
+        <span>Jitter: <strong style="color: var(--accent-emerald);">${jitStr}</strong></span>
+        <span>Loss: <strong style="color: ${cons.fraction_lost > 1 ? '#f87171' : '#fff'};">${lossStr}</strong></span>
         <span>Call-ID: <strong style="color: var(--text-primary);">${cons.call_id || 'Idle'}</strong></span>
       `;
     }

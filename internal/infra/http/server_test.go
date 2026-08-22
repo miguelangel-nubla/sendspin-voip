@@ -48,7 +48,11 @@ func (d *dummyIngress) RegisterPlayerWithCodecs(player domain.PlayerConfig, code
 func (d *dummyIngress) UnregisterPlayer(playerID string) error {
 	return nil
 }
-func (d *dummyIngress) SendStopToUpstream(playerID string) {}
+func (d *dummyIngress) SendStopToUpstream(playerID string)              {}
+func (d *dummyIngress) SendNextToUpstream(playerID string)              {}
+func (d *dummyIngress) SendPlayPauseToUpstream(playerID string)         {}
+func (d *dummyIngress) SendVolumeToUpstream(playerID string, vol int)   {}
+func (d *dummyIngress) SendMuteToUpstream(playerID string, muted bool)  {}
 func (d *dummyIngress) GetPlayerStats(playerID string) (app.IngressPlayerStats, bool) {
 	return app.IngressPlayerStats{
 		ServerAddr:     "127.0.0.1:8927",
@@ -278,4 +282,39 @@ func TestHTTPServer_Metrics(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPServer_HealthzAndReadyz(t *testing.T) {
+	sipCaller := &dummySIPCaller{}
+	bridge := app.NewBridgeService(
+		nil,
+		app.BridgeConfig{},
+		domain.NewTargetArbiter(""),
+		sipCaller,
+		&dummyRTPStreamer{},
+		&dummyIngress{},
+		nil,
+	)
+	srv := NewServer(nil, ServerConfig{
+		Listen:   ":8080",
+		APIToken: "protected-token",
+		Version:  "1.0.0",
+	}, bridge, sipCaller)
+
+	// 1. Healthz should succeed without auth
+	reqHealth := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rrHealth := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rrHealth, reqHealth)
+	if rrHealth.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for /healthz, got %d", rrHealth.Code)
+	}
+
+	// 2. Readyz should succeed without auth
+	reqReady := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rrReady := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rrReady, reqReady)
+	if rrReady.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for /readyz, got %d", rrReady.Code)
+	}
+}
+
 
