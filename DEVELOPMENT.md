@@ -31,8 +31,21 @@ This document contains technical details for developers contributing to `sendspi
 ## 🛠️ Building & Testing
 
 ```bash
+# Setup git pre-commit hook
+make hooks
+
+# Run code formatters and static checks
+make fmt
+make vet
+
 # Run all unit tests
 make test
+
+# Run race detector tests
+make test-race
+
+# Run all verification checks (formatting, vet, test, race, cross-compilation)
+make check
 
 # Compile static binary
 make build
@@ -40,4 +53,5 @@ make build
 # Build local Docker image
 make docker
 ```
+
 

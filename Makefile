@@ -16,9 +16,14 @@ CROSS_TARGETS := \
 	darwin/amd64/ \
 	windows/amd64/
 
-.PHONY: all build cross clean test test-race vet fmt fmt-check check run docker docker-multiarch
+.PHONY: all build cross clean test test-race vet fmt fmt-check check hooks run docker docker-multiarch
 
 all: build
+
+hooks:
+	git config core.hooksPath .githooks
+	chmod +x .githooks/*
+
 
 # CGO_ENABLED=0 keeps the binary static and cross-compilable. Every path that
 # produces a shipped artifact (this target, both Dockerfiles, release.yml)
