@@ -85,7 +85,6 @@ func (a *TargetArbiter) RequestTarget(newSession *CallSession) (*CallSession, er
 		return current, nil
 	}
 
-
 	return nil, fmt.Errorf("target %s is busy with active session from player %s (policy: %s)",
 		target, current.PlayerID, a.policy)
 }

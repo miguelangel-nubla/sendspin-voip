@@ -652,48 +652,11 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				w.statsMu.Unlock()
 
 				playAt := resolvePlayAt(w, chunk.Timestamp)
-
-				if currentCodec == "opus" {
-					var samples []int32
-					if opusDecoderReady {
-						n, err := opusDecoder.DecodeToInt16(chunk.Data, pcm16Buf)
-						if err == nil && n > 0 {
-							// n is samples *per channel*. Clamp against the decode
-							// buffer: a frame longer than the buffer, or a stream
-							// that reports more channels than the decoder was built
-							// for, would otherwise index past the end and panic.
-							total := n * currentChannels
-							if total > len(pcm16Buf) {
-								total = len(pcm16Buf)
-							}
-							samples = make([]int32, total)
-							for i := 0; i < total; i++ {
-								samples[i] = int32(pcm16Buf[i])
-							}
-						}
-					}
-					audioChunk := domain.AudioChunk{
-						Timestamp:  chunk.Timestamp,
-						PlayAt:     playAt,
-						OpusData:   chunk.Data,
-						Samples:    samples,
-						SampleRate: 48000,
-						Channels:   currentChannels,
-						BitDepth:   16,
-					}
-					w.handler.OnAudioChunk(w.cfg.ID, audioChunk)
-				} else {
-					samples := decodePCM(chunk.Data, currentBitDepth)
-					audioChunk := domain.AudioChunk{
-						Timestamp:  chunk.Timestamp,
-						PlayAt:     playAt,
-						Samples:    samples,
-						SampleRate: currentRate,
-						Channels:   currentChannels,
-						BitDepth:   currentBitDepth,
-					}
-					w.handler.OnAudioChunk(w.cfg.ID, audioChunk)
-				}
+				audioChunk := decodeIncomingAudioChunk(
+					chunk, currentCodec, currentRate, currentChannels, currentBitDepth,
+					playAt, &opusDecoder, opusDecoderReady, pcm16Buf,
+				)
+				w.handler.OnAudioChunk(w.cfg.ID, audioChunk)
 			}
 		}
 
@@ -768,6 +731,52 @@ func ptrString(p *string) string {
 		return *p
 	}
 	return ""
+}
+
+func decodeIncomingAudioChunk(
+	chunk protocol.AudioChunk,
+	currentCodec string,
+	currentRate, currentChannels, currentBitDepth int,
+	playAt time.Time,
+	opusDecoder *opus.Decoder,
+	opusDecoderReady bool,
+	pcm16Buf []int16,
+) domain.AudioChunk {
+	if currentCodec == "opus" {
+		var samples []int32
+		if opusDecoderReady && opusDecoder != nil {
+			n, err := opusDecoder.DecodeToInt16(chunk.Data, pcm16Buf)
+			if err == nil && n > 0 {
+				total := n * currentChannels
+				if total > len(pcm16Buf) {
+					total = len(pcm16Buf)
+				}
+				samples = make([]int32, total)
+				for i := 0; i < total; i++ {
+					samples[i] = int32(pcm16Buf[i])
+				}
+			}
+		}
+		return domain.AudioChunk{
+			Timestamp:  chunk.Timestamp,
+			PlayAt:     playAt,
+			OpusData:   chunk.Data,
+			Samples:    samples,
+			SampleRate: 48000,
+			Channels:   currentChannels,
+			BitDepth:   16,
+		}
+	}
+
+	samples := decodePCM(chunk.Data, currentBitDepth)
+	return domain.AudioChunk{
+		Timestamp:  chunk.Timestamp,
+		PlayAt:     playAt,
+		Samples:    samples,
+		SampleRate: currentRate,
+		Channels:   currentChannels,
+		BitDepth:   currentBitDepth,
+	}
 }
 
 func decodePCM(data []byte, bitDepth int) []int32 {

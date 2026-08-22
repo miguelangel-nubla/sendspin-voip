@@ -112,4 +112,3 @@ func NewPlayer(cfg PlayerConfig) (*Player, error) {
 		IsMuted: false,
 	}, nil
 }
-

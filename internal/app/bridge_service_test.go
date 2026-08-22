@@ -879,5 +879,3 @@ func TestBridgeService_PauseImmediatelyStopsAudio(t *testing.T) {
 
 	bridge.Shutdown()
 }
-
-

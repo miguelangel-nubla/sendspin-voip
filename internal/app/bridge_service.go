@@ -136,7 +136,6 @@ func NewBridgeService(
 	}
 }
 
-
 // RegisterPlayers registers configured players and starts dynamic downstream discovery.
 func (s *BridgeService) RegisterPlayers(configs []domain.PlayerConfig) error {
 	s.playersMu.Lock()
@@ -329,14 +328,7 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		return
 	}
 
-	s.playersMu.RLock()
-	volume := 100
-	if p, ok := s.players[playerID]; ok {
-		volume = p.EffectiveVolume()
-	}
-	s.playersMu.RUnlock()
-
-	rtpSess.SetVolume(volume)
+	rtpSess.SetVolume(s.getEffectiveVolume(playerID))
 
 	startProgSec := meta.ElapsedSeconds(true)
 	if startProgSec <= 0 {
@@ -448,7 +440,6 @@ func (s *BridgeService) OnStreamClear(playerID string) {
 		s.logger.Debug("Flushed audio pipeline buffers on stream clear", "player_id", playerID)
 	}
 }
-
 
 // OnPlaybackState handles playback state changes from Music Assistant (playing, paused, stopped).
 func (s *BridgeService) OnPlaybackState(playerID string, state string) {
@@ -568,60 +559,58 @@ func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 	call.mu.Unlock()
 }
 
-// OnVolumeChange updates player volume gain. The Conversion ready queue
-// is flushed so the new level applies immediately, while the raw Upstream
-// buffer is left intact.
-func (s *BridgeService) OnVolumeChange(playerID string, volume int) {
-	volume = domain.ClampVolume(volume)
-
-	var isMuted bool
-	s.playersMu.Lock()
-	if p, ok := s.players[playerID]; ok {
-		p.SetVolume(volume)
-		isMuted = p.IsMuted
-		s.logger.Debug("Player volume changed", "player_id", playerID, "volume", volume)
-	}
-	s.playersMu.Unlock()
-
-	if s.stateStore != nil {
-		_ = s.stateStore.SetPlayerState(playerID, PlayerStateRecord{Volume: volume, Muted: isMuted})
-	}
-
-	s.flushActiveRTPBuffer(playerID)
-}
-
-// OnMuteChange updates player mute status.
-func (s *BridgeService) OnMuteChange(playerID string, muted bool) {
-	var curVol int = 100
-	s.playersMu.Lock()
-	if p, ok := s.players[playerID]; ok {
-		p.IsMuted = muted
-		curVol = p.Volume
-		s.logger.Debug("Player mute state changed", "player_id", playerID, "muted", muted)
-	}
-	s.playersMu.Unlock()
-
-	if s.stateStore != nil {
-		_ = s.stateStore.SetPlayerState(playerID, PlayerStateRecord{Volume: curVol, Muted: muted})
-	}
-
-	s.flushActiveRTPBuffer(playerID)
-}
-
-func (s *BridgeService) flushActiveRTPBuffer(playerID string) {
+func (s *BridgeService) getEffectiveVolume(playerID string) int {
 	s.playersMu.RLock()
-	volume := 100
+	defer s.playersMu.RUnlock()
 	if p, ok := s.players[playerID]; ok {
-		volume = p.EffectiveVolume()
+		return p.EffectiveVolume()
 	}
-	s.playersMu.RUnlock()
+	return 100
+}
+
+func (s *BridgeService) updatePlayerState(playerID string, mutator func(p *domain.Player)) {
+	var vol int = 100
+	var muted bool
+	var effectiveVol int = 100
+
+	s.playersMu.Lock()
+	if p, ok := s.players[playerID]; ok {
+		mutator(p)
+		vol = p.Volume
+		muted = p.IsMuted
+		effectiveVol = p.EffectiveVolume()
+	}
+	s.playersMu.Unlock()
+
+	if s.stateStore != nil {
+		_ = s.stateStore.SetPlayerState(playerID, PlayerStateRecord{Volume: vol, Muted: muted})
+	}
 
 	if val, ok := s.activeCalls.Load(playerID); ok {
 		call := val.(*activeCallState)
 		if call.rtpSession != nil {
-			call.rtpSession.SetVolume(volume)
+			call.rtpSession.SetVolume(effectiveVol)
 		}
 	}
+}
+
+// OnVolumeChange updates player volume gain. The Conversion ready queue
+// is flushed so the new level applies immediately, while the raw Upstream
+// buffer is left intact.
+func (s *BridgeService) OnVolumeChange(playerID string, volume int) {
+	clamped := domain.ClampVolume(volume)
+	s.updatePlayerState(playerID, func(p *domain.Player) {
+		p.SetVolume(clamped)
+		s.logger.Debug("Player volume changed", "player_id", playerID, "volume", clamped)
+	})
+}
+
+// OnMuteChange updates player mute status.
+func (s *BridgeService) OnMuteChange(playerID string, muted bool) {
+	s.updatePlayerState(playerID, func(p *domain.Player) {
+		p.IsMuted = muted
+		s.logger.Debug("Player mute state changed", "player_id", playerID, "muted", muted)
+	})
 }
 
 // OnGroupUpdate tracks multi-room sync group membership.
@@ -772,5 +761,3 @@ func (s *BridgeService) GetStreamDebugInfo(id string) (StreamDebugInfo, bool) {
 	info := buildStreamDebugInfo(player, ingStats, hasIngress, discoveredCodecs, callSnap)
 	return info, true
 }
-
-

@@ -57,7 +57,6 @@ func NewCallSession(
 	}
 }
 
-
 // SetState updates the session state thread-safely.
 func (s *CallSession) SetState(state SessionState) {
 	s.mu.Lock()

@@ -244,7 +244,6 @@ type RTPSession interface {
 	Stats() RTPStats
 }
 
-
 // AudioTranscoderPort defines the interface for resampling, volume adjustment, and codec encoding.
 type AudioTranscoderPort interface {
 	// Transcode converts incoming PCM samples to the target codec payload.

@@ -304,4 +304,3 @@ func (c Codec) LongDescription() string {
 		return ""
 	}
 }
-

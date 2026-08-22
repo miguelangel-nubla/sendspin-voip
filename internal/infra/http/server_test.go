@@ -90,7 +90,6 @@ func TestHTTPServer_Endpoints(t *testing.T) {
 		},
 	})
 
-
 	srv := NewServer(nil, ServerConfig{
 		Listen:    ":8080",
 		Version:   "1.0.0-test",
@@ -178,7 +177,6 @@ func TestHTTPServer_APITokenAuth(t *testing.T) {
 		&dummyIngress{},
 		nil,
 	)
-
 
 	srv := NewServer(nil, ServerConfig{
 		Listen:   ":8080",

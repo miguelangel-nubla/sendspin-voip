@@ -41,10 +41,10 @@ type AudioPath struct {
 	pcmPlayAt          time.Time
 	pcmAccumulatedTime time.Duration
 	chunksPendingCount int
-	ingressRawCodec     string
-	ingressRawRate      int
-	ingressRawChannels  int
-	ingressRawBitDepth  int
+	ingressRawCodec    string
+	ingressRawRate     int
+	ingressRawChannels int
+	ingressRawBitDepth int
 
 	// Converted 20ms ready frames buffer
 	ready []ReadyFrame

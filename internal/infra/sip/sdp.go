@@ -190,22 +190,24 @@ func ParseSDPCodecs(sdpRaw string) []domain.Codec {
 		}
 
 		ptToCodec := buildMediaRtpmap(m)
-		for _, codec := range ptToCodec {
-			add(codec)
-		}
-
-		// Static PTs from m= line when not already covered by rtpmap
 		for _, fmtStr := range m.MediaName.Formats {
 			pt64, err := strconv.ParseUint(fmtStr, 10, 8)
 			if err != nil {
 				continue
 			}
 			pt := uint8(pt64)
-			if _, ok := ptToCodec[pt]; ok {
-				continue
-			}
-			if c, ok := staticRFC3551Codec(pt); ok {
+			if c, ok := ptToCodec[pt]; ok {
 				add(c)
+			} else if c, ok := staticRFC3551Codec(pt); ok {
+				add(c)
+			}
+		}
+
+		for _, attr := range m.Attributes {
+			if strings.EqualFold(attr.Key, "rtpmap") {
+				if _, codec, ok := parseRtpmap(attr.Value); ok {
+					add(codec)
+				}
 			}
 		}
 	}

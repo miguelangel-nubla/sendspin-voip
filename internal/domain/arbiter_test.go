@@ -60,4 +60,3 @@ func TestTargetArbiter_Preemption(t *testing.T) {
 		t.Fatalf("expected no preemption after release")
 	}
 }
-

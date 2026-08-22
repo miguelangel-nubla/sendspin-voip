@@ -35,25 +35,7 @@ func buildStreamDebugInfo(
 	isGrouped := player.IsGrouped
 	effectiveVol := player.EffectiveVolume()
 
-	prodInfo, prodFormat, bitrateIn, trackProgSec := buildProducerInfo(player, ingStats, hasIngress)
-
-	info := StreamDebugInfo{
-		ID:        cfg.ID,
-		Name:      cfg.Name,
-		State:     "idle",
-		IsPlaying: isPlaying,
-		IsGrouped: isGrouped,
-		Volume:    vol,
-		Muted:     muted,
-		AudioPath: AudioPathDebugInfo{
-			Muted:         muted,
-			VolumePercent: effectiveVol,
-			IngressCodec:  ingStats.Codec,
-			IngressFormat: prodFormat,
-		},
-		Producers: []ProducerDebugInfo{prodInfo},
-		Consumers: make([]ConsumerDebugInfo, 0, 1),
-	}
+	prodInfo, prodFormat, bitrateIn, trackProgSec := buildProducerInfo(player, ingStats)
 
 	allCodecs := domain.PrioritizeCodecs(cfg.Codec, nil)
 	offeredSIPCodecs := make([]string, len(allCodecs))
@@ -66,21 +48,26 @@ func buildStreamDebugInfo(
 		autoAnswerDesc = fmt.Sprintf("custom (%s)", cfg.CustomAutoAnswerHeader)
 	}
 
-	if call.hasCall {
-		consumer, audioPath, state := buildActiveCallInfo(cfg, call, discoveredCodecs, offeredSIPCodecs, autoAnswerDesc, prodFormat, bitrateIn, trackProgSec, effectiveVol, muted)
-		info.State = state
-		info.AudioPath = audioPath
-		info.Consumers = append(info.Consumers, consumer)
-	} else {
-		consumer, audioPath := buildIdleCallInfo(cfg, discoveredCodecs, offeredSIPCodecs, autoAnswerDesc, prodFormat, effectiveVol, muted)
-		info.AudioPath = audioPath
-		info.Consumers = append(info.Consumers, consumer)
-	}
+	consumer, audioPath, state := buildConsumerAndAudioPathInfo(
+		cfg, call, discoveredCodecs, offeredSIPCodecs, autoAnswerDesc,
+		prodFormat, bitrateIn, trackProgSec, effectiveVol, muted,
+	)
 
-	return info
+	return StreamDebugInfo{
+		ID:        cfg.ID,
+		Name:      cfg.Name,
+		State:     state,
+		IsPlaying: isPlaying,
+		IsGrouped: isGrouped,
+		Volume:    vol,
+		Muted:     muted,
+		AudioPath: audioPath,
+		Producers: []ProducerDebugInfo{prodInfo},
+		Consumers: []ConsumerDebugInfo{consumer},
+	}
 }
 
-func buildProducerInfo(player *domain.Player, ingStats IngressPlayerStats, hasIngress bool) (ProducerDebugInfo, string, int, float64) {
+func buildProducerInfo(player *domain.Player, ingStats IngressPlayerStats) (ProducerDebugInfo, string, int, float64) {
 	prodState := "disconnected"
 	if ingStats.Connected {
 		if player.IsPlaying {
@@ -123,7 +110,7 @@ func buildProducerInfo(player *domain.Player, ingStats IngressPlayerStats, hasIn
 	return prod, prodFormat, bitrateIn, trackProgSec
 }
 
-func buildActiveCallInfo(
+func buildConsumerAndAudioPathInfo(
 	cfg domain.PlayerConfig,
 	call callDiagnosticsSnapshot,
 	discoveredCodecs, offeredSIPCodecs []string,
@@ -134,10 +121,65 @@ func buildActiveCallInfo(
 	muted bool,
 ) (ConsumerDebugInfo, AudioPathDebugInfo, string) {
 	activeCodec := cfg.Codec
-	if call.rtpStats.Codec != "" {
+	if call.hasCall && call.rtpStats.Codec != "" {
 		activeCodec = call.rtpStats.Codec
 	}
 
+	bitrateOut := 64
+	egressCh := 1
+	if activeCodec == domain.CodecOpus {
+		bitrateOut = bitrateIn
+		if bitrateOut <= 0 {
+			bitrateOut = 128
+		}
+		egressCh = 2
+		if call.rtpStats.PathIngressChannels == 1 {
+			egressCh = 1
+		}
+	} else if !call.hasCall {
+		bitrateOut = cfg.Codec.DefaultBitrateKbps()
+	}
+
+	egressFormat := activeCodec.FormatDescription(egressCh, bitrateOut)
+
+	ap := AudioPathDebugInfo{
+		Muted:         muted,
+		VolumePercent: effectiveVol,
+		IngressFormat: prodFormat,
+		EgressCodec:   string(activeCodec),
+		EgressFormat:  egressFormat,
+		PlayheadSec:   trackProgSec,
+	}
+
+	consumer := ConsumerDebugInfo{
+		Type:             "SIP/RTP Egress",
+		URL:              cfg.SIPTarget,
+		ConfigCodec:      string(cfg.Codec),
+		ActiveCodec:      string(activeCodec),
+		DiscoveredCodecs: discoveredCodecs,
+		OfferedCodecs:    offeredSIPCodecs,
+		NegotiatedSDP:    activeCodec.SDPDescription(),
+		RTPClockRate:     activeCodec.RTPClockRate(),
+		PayloadType:      activeCodec.PayloadType(),
+		Format:           egressFormat,
+		AutoAnswer:       autoAnswerDesc,
+		Priority:         cfg.Priority,
+		BitrateKbps:      bitrateOut,
+	}
+
+	if !call.hasCall {
+		state := "idle"
+		consumer.State = state
+		ap.Summary = "idle — " + prodFormat + " ⇢ (no call) ⇢ " + cfg.Codec.DisplayName()
+		ap.Stages = []string{
+			"Stage 1: Upstream Ingress (" + prodFormat + ")",
+			"Stage 2: No active SIP session",
+			"Stage 3: Configured Egress " + cfg.Codec.DisplayName(),
+		}
+		return consumer, ap, state
+	}
+
+	// Active call configuration
 	state := "idle"
 	if call.lingerActive {
 		state = "lingering"
@@ -159,34 +201,21 @@ func buildActiveCallInfo(
 		localRTPStr = fmt.Sprintf("0.0.0.0:%d", call.rtpStats.LocalPort)
 	}
 
-	bitrateOut := 64
-	egressCh := 1
-	if activeCodec == domain.CodecOpus {
-		bitrateOut = bitrateIn
-		if bitrateOut <= 0 {
-			bitrateOut = 128
-		}
-		egressCh = 2
-		if call.rtpStats.PathIngressChannels == 1 {
-			egressCh = 1
-		}
-	}
+	consumer.CallID = call.callID
+	consumer.State = state
+	consumer.Priority = call.priority
+	consumer.LocalRTP = localRTPStr
+	consumer.RemoteRTP = call.rtpStats.RemoteAddr
+	consumer.LingerActive = call.lingerActive
+	consumer.PacketsSent = call.rtpStats.PacketsSent
+	consumer.BytesSent = call.rtpStats.BytesSent
+	consumer.DurationSec = durationSec
 
-	egressFormat := activeCodec.FormatDescription(egressCh, bitrateOut)
+	ap.UpstreamChunks = call.rtpStats.UpstreamChunks
+	ap.ConversionQueue = call.rtpStats.ConversionQueue
+	ap.PassthroughPackets = call.rtpStats.PassthroughPackets
+	ap.TranscodePackets = call.rtpStats.TranscodePackets
 
-	ap := AudioPathDebugInfo{
-		Muted:              muted,
-		VolumePercent:      effectiveVol,
-		EgressCodec:        string(activeCodec),
-		EgressFormat:       egressFormat,
-		UpstreamChunks:     call.rtpStats.UpstreamChunks,
-		ConversionQueue:    call.rtpStats.ConversionQueue,
-		PassthroughPackets: call.rtpStats.PassthroughPackets,
-		TranscodePackets:   call.rtpStats.TranscodePackets,
-		PlayheadSec:        trackProgSec,
-	}
-
-	// Buffer timeline calculation
 	now := time.Now()
 	upStartOffset, upEndOffset := calcTimelineOffsets(now, call.rtpStats.UpstreamPlayAtStart, call.rtpStats.UpstreamPlayAtEnd, call.rtpStats.UpstreamChunks)
 	readyStartOffset, readyEndOffset := calcTimelineOffsets(now, call.rtpStats.ReadyPlayAtStart, call.rtpStats.ReadyPlayAtEnd, call.rtpStats.ConversionQueue)
@@ -235,74 +264,7 @@ func buildActiveCallInfo(
 		ap.Stages = []string{"Stage 1: Upstream Ingress (" + prodFormat + ")", "Stage 2: Codec Negotiation", "Stage 3: RTP Pending"}
 	}
 
-	consumer := ConsumerDebugInfo{
-		Type:             "SIP/RTP Egress",
-		URL:              cfg.SIPTarget,
-		CallID:           call.callID,
-		State:            state,
-		ConfigCodec:      string(cfg.Codec),
-		ActiveCodec:      string(activeCodec),
-		DiscoveredCodecs: discoveredCodecs,
-		OfferedCodecs:    offeredSIPCodecs,
-		NegotiatedSDP:    activeCodec.SDPDescription(),
-		RTPClockRate:     activeCodec.RTPClockRate(),
-		PayloadType:      activeCodec.PayloadType(),
-		Format:           egressFormat,
-		LocalRTP:         localRTPStr,
-		RemoteRTP:        call.rtpStats.RemoteAddr,
-		AutoAnswer:       autoAnswerDesc,
-		Priority:         call.priority,
-		LingerActive:     call.lingerActive,
-		PacketsSent:      call.rtpStats.PacketsSent,
-		BytesSent:        call.rtpStats.BytesSent,
-		BitrateKbps:      bitrateOut,
-		DurationSec:      durationSec,
-	}
-
 	return consumer, ap, state
-}
-
-func buildIdleCallInfo(
-	cfg domain.PlayerConfig,
-	discoveredCodecs, offeredSIPCodecs []string,
-	autoAnswerDesc, prodFormat string,
-	effectiveVol int,
-	muted bool,
-) (ConsumerDebugInfo, AudioPathDebugInfo) {
-	bitrateOut := cfg.Codec.DefaultBitrateKbps()
-	egressFormat := cfg.Codec.FormatDescription(1, bitrateOut)
-
-	ap := AudioPathDebugInfo{
-		Muted:         muted,
-		VolumePercent: effectiveVol,
-		EgressCodec:   string(cfg.Codec),
-		EgressFormat:  egressFormat,
-		Summary:       "idle — " + prodFormat + " ⇢ (no call) ⇢ " + cfg.Codec.DisplayName(),
-		Stages: []string{
-			"Stage 1: Upstream Ingress (" + prodFormat + ")",
-			"Stage 2: No active SIP session",
-			"Stage 3: Configured Egress " + cfg.Codec.DisplayName(),
-		},
-	}
-
-	consumer := ConsumerDebugInfo{
-		Type:             "SIP/RTP Egress",
-		URL:              cfg.SIPTarget,
-		State:            "idle",
-		ConfigCodec:      string(cfg.Codec),
-		ActiveCodec:      string(cfg.Codec),
-		DiscoveredCodecs: discoveredCodecs,
-		OfferedCodecs:    offeredSIPCodecs,
-		NegotiatedSDP:    cfg.Codec.SDPDescription(),
-		RTPClockRate:     cfg.Codec.RTPClockRate(),
-		PayloadType:      cfg.Codec.PayloadType(),
-		Format:           egressFormat,
-		AutoAnswer:       autoAnswerDesc,
-		Priority:         cfg.Priority,
-		BitrateKbps:      bitrateOut,
-	}
-
-	return consumer, ap
 }
 
 func volumeStageForDebug(volumePercent int, muted bool) string {
