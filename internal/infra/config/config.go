@@ -19,9 +19,9 @@ type AppConfig struct {
 	LogLevel string `yaml:"log_level" json:"log_level"`
 	// StateFile is where per-player volume/mute state is persisted. Empty means
 	// "pick a sensible default" — see DefaultStateFilePath.
-	StateFile string         `yaml:"state_file" json:"state_file"`
-	HTTP      HTTPConfig     `yaml:"http" json:"http"`
-	SIP       SIPConfig      `yaml:"sip" json:"sip"`
+	StateFile string           `yaml:"state_file" json:"state_file"`
+	HTTP      HTTPConfig       `yaml:"http" json:"http"`
+	SIP       SIPConfig        `yaml:"sip" json:"sip"`
 	Sendspin  SendspinConfig   `yaml:"sendspin" json:"sendspin"`
 	Bridge    app.BridgeConfig `yaml:"bridge" json:"bridge"`
 	Players   []PlayerConfig   `yaml:"players" json:"players"`

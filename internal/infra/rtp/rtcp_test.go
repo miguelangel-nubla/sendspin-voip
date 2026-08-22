@@ -37,7 +37,7 @@ func TestParseRTCPReceiverReport(t *testing.T) {
 	rr[12] = 12                                      // Fraction lost ~ 4.68%
 	rr[13] = 0
 	rr[14] = 0
-	rr[15] = 5 // 5 packets lost
+	rr[15] = 5                                  // 5 packets lost
 	binary.BigEndian.PutUint32(rr[16:20], 1005) // Highest seq
 	binary.BigEndian.PutUint32(rr[20:24], 160)  // Jitter (160 samples = 20ms @ 8kHz)
 	binary.BigEndian.PutUint32(rr[24:28], 0xAABBCCDD)

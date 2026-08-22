@@ -48,11 +48,11 @@ func (d *dummyIngress) RegisterPlayerWithCodecs(player domain.PlayerConfig, code
 func (d *dummyIngress) UnregisterPlayer(playerID string) error {
 	return nil
 }
-func (d *dummyIngress) SendStopToUpstream(playerID string)              {}
-func (d *dummyIngress) SendNextToUpstream(playerID string)              {}
-func (d *dummyIngress) SendPlayPauseToUpstream(playerID string)         {}
-func (d *dummyIngress) SendVolumeToUpstream(playerID string, vol int)   {}
-func (d *dummyIngress) SendMuteToUpstream(playerID string, muted bool)  {}
+func (d *dummyIngress) SendStopToUpstream(playerID string)             {}
+func (d *dummyIngress) SendNextToUpstream(playerID string)             {}
+func (d *dummyIngress) SendPlayPauseToUpstream(playerID string)        {}
+func (d *dummyIngress) SendVolumeToUpstream(playerID string, vol int)  {}
+func (d *dummyIngress) SendMuteToUpstream(playerID string, muted bool) {}
 func (d *dummyIngress) GetPlayerStats(playerID string) (app.IngressPlayerStats, bool) {
 	return app.IngressPlayerStats{
 		ServerAddr:     "127.0.0.1:8927",
@@ -316,5 +316,3 @@ func TestHTTPServer_HealthzAndReadyz(t *testing.T) {
 		t.Fatalf("expected 200 OK for /readyz, got %d", rrReady.Code)
 	}
 }
-
-

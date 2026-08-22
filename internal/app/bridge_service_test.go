@@ -182,11 +182,11 @@ func (m *mockIngress) StopAll() error {
 	return nil
 }
 
-func (m *mockIngress) SendStopToUpstream(playerID string)                   {}
-func (m *mockIngress) SendNextToUpstream(playerID string)                   {}
-func (m *mockIngress) SendPlayPauseToUpstream(playerID string)              {}
-func (m *mockIngress) SendVolumeToUpstream(playerID string, volume int)     {}
-func (m *mockIngress) SendMuteToUpstream(playerID string, muted bool)       {}
+func (m *mockIngress) SendStopToUpstream(playerID string)               {}
+func (m *mockIngress) SendNextToUpstream(playerID string)               {}
+func (m *mockIngress) SendPlayPauseToUpstream(playerID string)          {}
+func (m *mockIngress) SendVolumeToUpstream(playerID string, volume int) {}
+func (m *mockIngress) SendMuteToUpstream(playerID string, muted bool)   {}
 
 func (m *mockIngress) GetPlayerStats(playerID string) (IngressPlayerStats, bool) {
 	return IngressPlayerStats{

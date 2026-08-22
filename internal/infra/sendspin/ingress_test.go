@@ -120,13 +120,13 @@ type dummyEventHandler struct{}
 
 func (d *dummyEventHandler) OnStreamStart(playerID string, meta domain.StreamMetadata) {}
 func (d *dummyEventHandler) OnMetadata(playerID string, meta domain.StreamMetadata)    {}
-func (d *dummyEventHandler) OnStreamClear(playerID string)                              {}
-func (d *dummyEventHandler) OnPlaybackState(playerID string, state string)              {}
-func (d *dummyEventHandler) OnAudioChunk(playerID string, chunk domain.AudioChunk)      {}
-func (d *dummyEventHandler) OnStreamEnd(playerID string)                                {}
+func (d *dummyEventHandler) OnStreamClear(playerID string)                             {}
+func (d *dummyEventHandler) OnPlaybackState(playerID string, state string)             {}
+func (d *dummyEventHandler) OnAudioChunk(playerID string, chunk domain.AudioChunk)     {}
+func (d *dummyEventHandler) OnStreamEnd(playerID string)                               {}
 func (d *dummyEventHandler) OnVolumeChange(playerID string, volume int)                {}
-func (d *dummyEventHandler) OnMuteChange(playerID string, muted bool)                   {}
-func (d *dummyEventHandler) OnGroupUpdate(playerID string, isGrouped bool)              {}
+func (d *dummyEventHandler) OnMuteChange(playerID string, muted bool)                  {}
+func (d *dummyEventHandler) OnGroupUpdate(playerID string, isGrouped bool)             {}
 
 func TestIngress_RegisterAndUnregister(t *testing.T) {
 	ing := NewIngress(nil, IngressConfig{
@@ -310,7 +310,3 @@ func TestIngress_RegisterPlayerWithCodecs_PreservesZeroVolume(t *testing.T) {
 		t.Errorf("expected worker volume to be 0, got %d", vol)
 	}
 }
-
-
-
-

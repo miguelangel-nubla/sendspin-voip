@@ -510,7 +510,6 @@ func (s *BridgeService) handleDTMF(playerID, digit string) {
 	}
 }
 
-
 // OnMetadata handles real-time track metadata updates from Music Assistant (e.g. gapless transitions).
 func (s *BridgeService) OnMetadata(playerID string, meta domain.StreamMetadata) {
 	if val, ok := s.activeCalls.Load(playerID); ok {

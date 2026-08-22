@@ -426,5 +426,3 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		"sip_status": sipStatus,
 	})
 }
-
-

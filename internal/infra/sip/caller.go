@@ -33,15 +33,15 @@ type CallerConfig struct {
 
 // Caller implements app.SIPCallerPort using sipgo.
 type Caller struct {
-	logger        *slog.Logger
-	config        CallerConfig
-	ua            *sipgo.UserAgent
-	client        *sipgo.Client
-	server        *sipgo.Server
-	dialogCache   *sipgo.DialogClientCache
-	localIP       string
-	fromDomain    string
-	activeDialogs map[string]*DialogWrapper
+	logger           *slog.Logger
+	config           CallerConfig
+	ua               *sipgo.UserAgent
+	client           *sipgo.Client
+	server           *sipgo.Server
+	dialogCache      *sipgo.DialogClientCache
+	localIP          string
+	fromDomain       string
+	activeDialogs    map[string]*DialogWrapper
 	registered       bool
 	lastRegister     time.Time
 	registerInterval time.Duration
