@@ -94,6 +94,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/info", s.handleAPIInfo)
 	mux.HandleFunc("/api/status", s.handleAPIInfo)
 	mux.HandleFunc("/api/codecs", s.handleAPICodecs)
+	mux.HandleFunc("/metrics", s.handleMetrics)
 
 	// Profiling — disabled by default (enable via http.enable_pprof)
 	if s.config.EnablePprof {
@@ -349,3 +350,29 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(dashboardHTML)
 }
+
+// handleMetrics serves Prometheus metrics for monitoring and alerting.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
+	var sipStatus app.SIPStatus
+	if s.sipCaller != nil {
+		sipStatus = s.sipCaller.RegistrationStatus()
+	}
+
+	var streams map[string]app.StreamDebugInfo
+	if s.bridgeService != nil {
+		streams = s.bridgeService.GetStreamsDebugInfo()
+	}
+
+	WritePrometheusMetrics(
+		w,
+		s.config.Version,
+		s.config.Commit,
+		s.config.BuildDate,
+		s.startTime,
+		sipStatus,
+		streams,
+	)
+}
+

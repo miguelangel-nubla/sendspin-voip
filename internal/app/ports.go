@@ -48,6 +48,9 @@ type RTPStats struct {
 	ReadyPlayAtStart    time.Time `json:"ready_play_at_start,omitempty"`
 	ReadyPlayAtEnd      time.Time `json:"ready_play_at_end,omitempty"`
 	Answered            bool      `json:"answered"`
+	RemoteJitterMs      float64   `json:"remote_jitter_ms,omitempty"`
+	RemoteFractionLost  float64   `json:"remote_fraction_lost,omitempty"`
+	RemoteRTTMs         float64   `json:"remote_rtt_ms,omitempty"`
 }
 
 // AudioPathDebugInfo describes the end-to-end processing pipeline for a stream.
@@ -158,6 +161,9 @@ type ConsumerDebugInfo struct {
 	BytesSent        uint64   `json:"bytes_sent"`
 	BitrateKbps      int      `json:"bitrate_kbps,omitempty"`
 	DurationSec      float64  `json:"duration_sec"`
+	RemoteJitterMs   float64  `json:"remote_jitter_ms,omitempty"`
+	FractionLost     float64  `json:"fraction_lost,omitempty"`
+	RoundTripTimeMs  float64  `json:"round_trip_time_ms,omitempty"`
 }
 
 // StreamDebugInfo provides comprehensive debug information for a virtual player stream.

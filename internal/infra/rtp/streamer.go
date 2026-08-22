@@ -160,7 +160,7 @@ func (s *Session) Stats() app.RTPStats {
 	answered := s.answered
 	s.mu.Unlock()
 
-	packetsSent, bytesSent, localPort, remoteStr := s.transmitter.Stats()
+	packetsSent, bytesSent, localPort, remoteStr, jitterMs, fractionLost, rttMs := s.transmitter.Stats()
 	apStats := s.audioPath.Stats()
 	upChunks := s.audioPath.UpstreamLen()
 	upOldest, upNewest, _ := s.audioPath.UpstreamPlayAtBounds()
@@ -197,6 +197,9 @@ func (s *Session) Stats() app.RTPStats {
 		ReadyPlayAtStart:    readyOldest,
 		ReadyPlayAtEnd:      readyNewest,
 		Answered:            answered,
+		RemoteJitterMs:      jitterMs,
+		RemoteFractionLost:  fractionLost,
+		RemoteRTTMs:         rttMs,
 	}
 }
 

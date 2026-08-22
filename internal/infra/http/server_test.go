@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/miguelangel-nubla/sendspin-voip/internal/app"
@@ -227,3 +228,54 @@ func TestHTTPServer_PprofDisabledByDefault(t *testing.T) {
 		t.Fatalf("expected 404 for pprof when disabled, got %d", rr.Code)
 	}
 }
+
+func TestHTTPServer_Metrics(t *testing.T) {
+	sipCaller := &dummySIPCaller{}
+	bridge := app.NewBridgeService(
+		nil,
+		app.BridgeConfig{},
+		domain.NewTargetArbiter(""),
+		sipCaller,
+		&dummyRTPStreamer{},
+		&dummyIngress{},
+		nil,
+	)
+	_ = bridge.RegisterPlayers([]domain.PlayerConfig{
+		{
+			ID:        "kitchen_speaker",
+			Name:      "Kitchen Speaker",
+			SIPTarget: "sip:102@127.0.0.1",
+			Codec:     domain.CodecOpus,
+		},
+	})
+
+	srv := NewServer(nil, ServerConfig{
+		Listen:    ":8080",
+		Version:   "1.2.3",
+		Commit:    "fedcba",
+		BuildDate: "2026-08-22",
+	}, bridge, sipCaller)
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rr := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for /metrics, got %d", rr.Code)
+	}
+
+	body := rr.Body.String()
+	for _, expected := range []string{
+		"sendspin_voip_build_info",
+		"sendspin_voip_uptime_seconds",
+		"sendspin_voip_sip_registered",
+		"sendspin_voip_players_total 1",
+		"sendspin_voip_player_active",
+		"go_goroutines",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("metrics response missing %q:\n%s", expected, body)
+		}
+	}
+}
+

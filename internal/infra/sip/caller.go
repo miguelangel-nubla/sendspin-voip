@@ -44,6 +44,8 @@ type Caller struct {
 	activeDialogs map[string]*DialogWrapper
 	registered    bool
 	lastRegister  time.Time
+	ctx           context.Context
+	cancel        context.CancelFunc
 	mu            sync.Mutex
 }
 
@@ -142,11 +144,13 @@ func (c *Caller) Start(ctx context.Context) error {
 		_ = tx.Respond(res)
 	})
 
+	c.ctx, c.cancel = context.WithCancel(context.Background())
+
 	c.logger.Info("SIP client & server starting", "local_ip", c.localIP, "local_port", c.config.LocalSIPPort)
 
 	listenAddr := net.JoinHostPort(c.localIP, strconv.Itoa(c.config.LocalSIPPort))
 	go func() {
-		if err := server.ListenAndServe(ctx, strings.ToLower(c.config.Transport), listenAddr); err != nil && ctx.Err() == nil {
+		if err := server.ListenAndServe(c.ctx, strings.ToLower(c.config.Transport), listenAddr); err != nil && c.ctx.Err() == nil {
 			c.logger.Warn("SIP server listen error", "err", err)
 		}
 	}()
@@ -154,13 +158,13 @@ func (c *Caller) Start(ctx context.Context) error {
 	// In PBX mode with server & username configured, perform SIP registration and maintain lease
 	if strings.EqualFold(c.config.Mode, "pbx") && c.config.Server != "" && c.config.Username != "" {
 		go func() {
-			regCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			regCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 			defer cancel()
 			if err := c.register(regCtx); err != nil {
 				c.logger.Warn("SIP PBX initial registration note", "err", err)
 			}
 		}()
-		go c.registrationLoop(ctx)
+		go c.registrationLoop(c.ctx)
 	}
 
 	return nil
@@ -269,6 +273,9 @@ func (c *Caller) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.cancel != nil {
+		c.cancel()
+	}
 	if c.server != nil {
 		_ = c.server.Close()
 	}

@@ -208,6 +208,9 @@ func buildConsumerAndAudioPathInfo(
 	consumer.PacketsSent = call.rtpStats.PacketsSent
 	consumer.BytesSent = call.rtpStats.BytesSent
 	consumer.DurationSec = durationSec
+	consumer.RemoteJitterMs = call.rtpStats.RemoteJitterMs
+	consumer.FractionLost = call.rtpStats.RemoteFractionLost
+	consumer.RoundTripTimeMs = call.rtpStats.RemoteRTTMs
 
 	ap.UpstreamChunks = call.rtpStats.UpstreamChunks
 	ap.ConversionQueue = call.rtpStats.ConversionQueue

@@ -32,6 +32,15 @@ type Transmitter struct {
 	packetsSent uint64
 	bytesSent   uint64
 
+	// RFC 3550 RTCP feedback & RFC 2833 DTMF state
+	dtmfHandler        func(digit string)
+	remoteJitterMs     float64
+	remoteFractionLost float64
+	remoteRTTMs        float64
+	lastSRCompactNTP   uint32
+	lastSRTime         time.Time
+	rtcpTickCounter    int
+
 	// Playout loop state
 	answered    bool
 	loopRunning bool
@@ -84,7 +93,7 @@ func NewTransmitter(
 	_, _ = rand.Read(seqBytes[:])
 	seq := binary.BigEndian.Uint16(seqBytes[:])
 
-	return &Transmitter{
+	tx := &Transmitter{
 		logger:      logger,
 		codec:       codec,
 		audioPath:   audioPath,
@@ -94,7 +103,12 @@ func NewTransmitter(
 		sequenceNum: seq,
 		firstPkt:    true,
 		stopChan:    make(chan struct{}),
-	}, nil
+	}
+
+	tx.wg.Add(1)
+	go tx.readLoop()
+
+	return tx, nil
 }
 
 // LocalPort returns the bound local UDP port.
@@ -115,6 +129,13 @@ func (t *Transmitter) SetCodec(codec domain.Codec) {
 	defer t.mu.Unlock()
 	t.codec = codec
 	t.firstPkt = true
+}
+
+// SetDTMFHandler registers a callback invoked when DTMF inband telephone-events arrive.
+func (t *Transmitter) SetDTMFHandler(handler func(digit string)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.dtmfHandler = handler
 }
 
 // SetAnswered marks the call as answered and starts the 20ms pacing loop.
@@ -145,15 +166,15 @@ func (t *Transmitter) ResetMarker() {
 	t.firstPkt = true
 }
 
-// Stats returns runtime transmission statistics.
-func (t *Transmitter) Stats() (packetsSent, bytesSent uint64, localPort int, remoteAddr string) {
+// Stats returns runtime transmission statistics including RTCP feedback.
+func (t *Transmitter) Stats() (packetsSent, bytesSent uint64, localPort int, remoteAddr string, jitterMs, fractionLost, rttMs float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	remoteStr := ""
 	if t.remoteAddr != nil {
 		remoteStr = t.remoteAddr.String()
 	}
-	return t.packetsSent, t.bytesSent, t.localPort, remoteStr
+	return t.packetsSent, t.bytesSent, t.localPort, remoteStr, t.remoteJitterMs, t.remoteFractionLost, t.remoteRTTMs
 }
 
 // pacingLoop executes every 20ms to release ready audio frames to the network.
@@ -169,6 +190,128 @@ func (t *Transmitter) pacingLoop() {
 			return
 		case <-ticker.C:
 			t.step()
+
+			t.mu.Lock()
+			t.rtcpTickCounter++
+			shouldSendSR := t.rtcpTickCounter >= 250 // ~5 seconds (250 * 20ms)
+			if shouldSendSR {
+				t.rtcpTickCounter = 0
+			}
+			t.mu.Unlock()
+
+			if shouldSendSR {
+				t.sendRTCPSenderReport()
+			}
+		}
+	}
+}
+
+// sendRTCPSenderReport builds and sends an RFC 3550 RTCP Sender Report.
+func (t *Transmitter) sendRTCPSenderReport() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.stopped || t.conn == nil || t.remoteAddr == nil || t.packetsSent == 0 {
+		return
+	}
+
+	now := time.Now()
+	sr := BuildRTCPSenderReport(t.ssrc, t.timestamp, uint32(t.packetsSent), uint32(t.bytesSent), now)
+	sec, frac := TimeToNTP(now)
+	t.lastSRCompactNTP = ((sec & 0xFFFF) << 16) | ((frac >> 16) & 0xFFFF)
+	t.lastSRTime = now
+
+	// Send to remote RTP address (multiplexed RTCP) and standard RTCP port (RTP port + 1)
+	_, _ = t.conn.WriteTo(sr, t.remoteAddr)
+	if t.remoteAddr.Port%2 == 0 {
+		rtcpAddr := &net.UDPAddr{
+			IP:   t.remoteAddr.IP,
+			Port: t.remoteAddr.Port + 1,
+		}
+		_, _ = t.conn.WriteTo(sr, rtcpAddr)
+	}
+}
+
+// readLoop listens for incoming UDP packets on the bound RTP socket (RTCP feedback and DTMF events).
+func (t *Transmitter) readLoop() {
+	defer t.wg.Done()
+
+	buf := make([]byte, 1500)
+	for {
+		t.mu.Lock()
+		conn := t.conn
+		stopped := t.stopped
+		t.mu.Unlock()
+
+		if stopped || conn == nil {
+			return
+		}
+
+		n, _, err := conn.ReadFrom(buf)
+		if err != nil {
+			return
+		}
+
+		if n > 0 {
+			t.handleIncomingPacket(buf[:n])
+		}
+	}
+}
+
+// handleIncomingPacket parses incoming RTCP reports and RFC 2833 / 4733 DTMF packets.
+func (t *Transmitter) handleIncomingPacket(data []byte) {
+	if len(data) < 4 {
+		return
+	}
+
+	version := (data[0] >> 6) & 0x03
+	if version != 2 {
+		return
+	}
+
+	pt := data[1]
+
+	// 1. Check for RTCP Receiver Report (PT=201) or Sender Report (PT=200)
+	if pt == 200 || pt == 201 {
+		report, err := ParseRTCPReceiverReport(data)
+		if err == nil && report != nil {
+			t.mu.Lock()
+			t.remoteFractionLost = report.FractionLost
+
+			rate := t.codec.RTPClockRate()
+			if rate > 0 {
+				t.remoteJitterMs = (float64(report.Jitter) / float64(rate)) * 1000.0
+			}
+
+			// RTT Calculation: RTT = A - LSR - DLSR
+			if report.LSR != 0 && report.DLSR != 0 && t.lastSRCompactNTP != 0 {
+				now := time.Now()
+				sec, frac := TimeToNTP(now)
+				nowCompact := ((sec & 0xFFFF) << 16) | ((frac >> 16) & 0xFFFF)
+				if nowCompact >= report.LSR+report.DLSR {
+					diff := nowCompact - report.LSR - report.DLSR
+					t.remoteRTTMs = (float64(diff) / 65536.0) * 1000.0
+				}
+			}
+			t.mu.Unlock()
+		}
+		return
+	}
+
+	// 2. Check for RFC 2833 / RFC 4733 DTMF telephone-event (PT=101)
+	payloadType := pt & 0x7F
+	if payloadType == 101 && len(data) >= 16 {
+		// RTP header is at least 12 bytes
+		dtmfPayload := data[12:]
+		evt, err := ParseDTMFPayload(dtmfPayload)
+		if err == nil && evt != nil {
+			t.mu.Lock()
+			handler := t.dtmfHandler
+			t.mu.Unlock()
+
+			if handler != nil && evt.Digit != "" {
+				handler(evt.Digit)
+			}
 		}
 	}
 }
@@ -270,6 +413,13 @@ func (t *Transmitter) DrainAndClose(drainDelay time.Duration) error {
 		t.mu.Unlock()
 		close(t.stopChan)
 	})
+
+	t.mu.Lock()
+	if t.conn != nil {
+		_ = t.conn.Close()
+	}
+	t.mu.Unlock()
+
 	t.wg.Wait()
 
 	if drainDelay > 0 {
@@ -278,11 +428,6 @@ func (t *Transmitter) DrainAndClose(drainDelay time.Duration) error {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	if t.conn != nil {
-		err := t.conn.Close()
-		t.conn = nil
-		return err
-	}
+	t.conn = nil
 	return nil
 }
