@@ -683,6 +683,7 @@
       }
 
       updateGlobalPacketCounters();
+      updateJsonModalContent();
     }
 
     function createCardHTML(id, st) {
@@ -869,16 +870,30 @@
       }
     }
 
+    let activeJsonStreamId = null;
+
     function inspectStreamJson(id) {
+      activeJsonStreamId = id;
       const modal = document.getElementById('jsonModal');
       document.getElementById('jsonModalTitle').textContent = `Stream Telemetry: ${id}`;
-      document.getElementById('jsonModalCode').textContent = JSON.stringify(globalStreams[id] || {}, null, 2);
+      updateJsonModalContent();
       modal.classList.add('open');
+    }
+
+    function updateJsonModalContent() {
+      if (!activeJsonStreamId) return;
+      const modal = document.getElementById('jsonModal');
+      if (!modal || !modal.classList.contains('open')) return;
+      const code = document.getElementById('jsonModalCode');
+      if (code) {
+        code.textContent = JSON.stringify(globalStreams[activeJsonStreamId] || {}, null, 2);
+      }
     }
 
     function closeJsonModal(e) {
       if (!e || e.target.id === 'jsonModal' || e.target.tagName === 'BUTTON') {
         document.getElementById('jsonModal').classList.remove('open');
+        activeJsonStreamId = null;
       }
     }
 
