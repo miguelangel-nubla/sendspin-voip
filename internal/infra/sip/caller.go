@@ -501,38 +501,51 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 	return dialog, nil
 }
 
-func (c *Caller) buildAutoAnswerHeaders(preset domain.AutoAnswerPreset, custom string) []sip.Header {
-	var headers []sip.Header
+var autoAnswerPresetHeaders = map[domain.AutoAnswerPreset][][2]string{
+	domain.AutoAnswerIntercom: {
+		{"Alert-Info", "Intercom"},
+		{"Call-Info", "<sip:sendspin-voip>;answer-after=0"},
+	},
+	domain.AutoAnswerYealink: {
+		{"Alert-Info", "info=alert-autoanswer;delay=0"},
+	},
+	domain.AutoAnswerGrandstream: {
+		{"Alert-Info", "Ring Answer"},
+	},
+	domain.AutoAnswerSnom: {
+		{"Alert-Info", "<sip:sendspin-voip>;info=alert-autoanswer;delay=0"},
+		{"Call-Info", "<sip:sendspin-voip>;answer-after=0"},
+	},
+	domain.AutoAnswerCallInfo: {
+		{"Call-Info", "<sip:sendspin-voip>;answer-after=0"},
+	},
+	domain.AutoAnswerPAutoAnswer: {
+		{"P-Auto-Answer", "true"},
+	},
+	domain.AutoAnswerDefault: {
+		{"Alert-Info", "<http://example.com>;info=alert-autoanswer"},
+		{"Call-Info", "<sip:sendspin-voip>;answer-after=0"},
+	},
+}
 
-	switch preset {
-	case domain.AutoAnswerIntercom:
-		headers = append(headers, sip.NewHeader("Alert-Info", "Intercom"))
-		headers = append(headers, sip.NewHeader("Call-Info", "<sip:sendspin-voip>;answer-after=0"))
-	case domain.AutoAnswerYealink:
-		headers = append(headers, sip.NewHeader("Alert-Info", "info=alert-autoanswer;delay=0"))
-	case domain.AutoAnswerGrandstream:
-		headers = append(headers, sip.NewHeader("Alert-Info", "Ring Answer"))
-	case domain.AutoAnswerSnom:
-		headers = append(headers, sip.NewHeader("Alert-Info", "<sip:sendspin-voip>;info=alert-autoanswer;delay=0"))
-		headers = append(headers, sip.NewHeader("Call-Info", "<sip:sendspin-voip>;answer-after=0"))
-	case domain.AutoAnswerCallInfo:
-		headers = append(headers, sip.NewHeader("Call-Info", "<sip:sendspin-voip>;answer-after=0"))
-	case domain.AutoAnswerPAutoAnswer:
-		headers = append(headers, sip.NewHeader("P-Auto-Answer", "true"))
-	case domain.AutoAnswerDefault:
-		headers = append(headers, sip.NewHeader("Alert-Info", "<http://example.com>;info=alert-autoanswer"))
-		headers = append(headers, sip.NewHeader("Call-Info", "<sip:sendspin-voip>;answer-after=0"))
-	case domain.AutoAnswerCustom:
+func (c *Caller) buildAutoAnswerHeaders(preset domain.AutoAnswerPreset, custom string) []sip.Header {
+	if preset == domain.AutoAnswerCustom {
 		if custom != "" {
-			parts := strings.SplitN(custom, ":", 2)
-			if len(parts) == 2 {
-				headers = append(headers, sip.NewHeader(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])))
+			if k, v, ok := strings.Cut(custom, ":"); ok {
+				return []sip.Header{sip.NewHeader(strings.TrimSpace(k), strings.TrimSpace(v))}
 			}
 		}
-	case domain.AutoAnswerNone:
-		// None
+		return nil
 	}
 
+	rawList, ok := autoAnswerPresetHeaders[preset]
+	if !ok {
+		return nil
+	}
+	headers := make([]sip.Header, 0, len(rawList))
+	for _, h := range rawList {
+		headers = append(headers, sip.NewHeader(h[0], h[1]))
+	}
 	return headers
 }
 

@@ -8,6 +8,101 @@ import (
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
 )
 
+// AudioPathDebugInfo describes the end-to-end processing pipeline for a stream.
+type AudioPathDebugInfo struct {
+	Mode               string   `json:"mode"` // idle | buffering | opus_passthrough | transcode | dialing
+	Summary            string   `json:"summary"`
+	Stages             []string `json:"stages"`
+	Passthrough        bool     `json:"passthrough"`
+	VolumePercent      int      `json:"volume_percent"`
+	Muted              bool     `json:"muted"`
+	IngressCodec       string   `json:"ingress_codec,omitempty"`
+	IngressFormat      string   `json:"ingress_format,omitempty"`
+	EgressCodec        string   `json:"egress_codec,omitempty"`
+	EgressFormat       string   `json:"egress_format,omitempty"`
+	UpstreamChunks     int      `json:"upstream_chunks,omitempty"`
+	ConversionQueue    int      `json:"conversion_queue,omitempty"`
+	PassthroughPackets uint64   `json:"passthrough_packets,omitempty"`
+	TranscodePackets   uint64   `json:"transcode_packets,omitempty"`
+	BufferStartSec     float64  `json:"buffer_start_sec,omitempty"`
+	BufferEndSec       float64  `json:"buffer_end_sec,omitempty"`
+	ReadyStartSec      float64  `json:"ready_start_sec,omitempty"`
+	ReadyEndSec        float64  `json:"ready_end_sec,omitempty"`
+	PlayheadSec        float64  `json:"playhead_sec,omitempty"`
+}
+
+// ProducerDebugInfo details the upstream audio ingress source.
+type ProducerDebugInfo struct {
+	Type             string   `json:"type"` // "Sendspin Ingress"
+	URL              string   `json:"url"`
+	Connected        bool     `json:"connected"`
+	Format           string   `json:"format"` // e.g. "PCM 16000Hz 1ch 16bit" or "Opus 48000Hz 2ch"
+	Codec            string   `json:"codec"`
+	SampleRate       int      `json:"sample_rate"`
+	Channels         int      `json:"channels"`
+	BitDepth         int      `json:"bit_depth"`
+	BitrateKbps      int      `json:"bitrate_kbps,omitempty"`
+	OfferedFormats   []string `json:"offered_formats,omitempty"` // e.g. ["PCM 16000Hz 1ch 16bit", "PCM 48000Hz 2ch 16bit"]
+	ExposedCodecs    []string `json:"exposed_codecs,omitempty"`  // e.g. ["opus", "pcm"]
+	State            string   `json:"state"`
+	Track            string   `json:"track,omitempty"`
+	Artist           string   `json:"artist,omitempty"`
+	Title            string   `json:"title,omitempty"`
+	Album            string   `json:"album,omitempty"`
+	AlbumArtist      string   `json:"album_artist,omitempty"`
+	TrackDurationSec float64  `json:"track_duration_sec,omitempty"`
+	TrackProgressSec float64  `json:"track_progress_sec,omitempty"`
+	ChunksReceived   uint64   `json:"chunks_received"`
+	BytesReceived    uint64   `json:"bytes_received"`
+}
+
+// ConsumerDebugInfo details the downstream SIP/RTP egress destination.
+type ConsumerDebugInfo struct {
+	Type             string   `json:"type"` // "SIP/RTP Egress"
+	URL              string   `json:"url"`  // e.g. "sip:8003@asterisk.local.myol.es"
+	CallID           string   `json:"call_id,omitempty"`
+	State            string   `json:"state"`
+	ConfigCodec      string   `json:"config_codec"`
+	ActiveCodec      string   `json:"active_codec"`
+	DiscoveredCodecs []string `json:"discovered_codecs,omitempty"` // Discovered via SIP OPTIONS probe
+	OfferedCodecs    []string `json:"offered_codecs,omitempty"`    // SDP Codecs offered in INVITE
+	NegotiatedSDP    string   `json:"negotiated_sdp,omitempty"`
+	RTPClockRate     uint32   `json:"rtp_clock_rate,omitempty"`
+	PayloadType      uint8    `json:"payload_type,omitempty"`
+	Format           string   `json:"format"` // e.g. "G.722 16000Hz 1ch (64 kbps)"
+	LocalRTP         string   `json:"local_rtp,omitempty"`
+	RemoteRTP        string   `json:"remote_rtp,omitempty"`
+	AutoAnswer       string   `json:"auto_answer,omitempty"`
+	Priority         int      `json:"priority"`
+	LingerActive     bool     `json:"linger_active"`
+	PacketsSent      uint64   `json:"packets_sent"`
+	BytesSent        uint64   `json:"bytes_sent"`
+	BitrateKbps      int      `json:"bitrate_kbps,omitempty"`
+	DurationSec      float64  `json:"duration_sec"`
+	RemoteJitterMs   float64  `json:"remote_jitter_ms,omitempty"`
+	FractionLost     float64  `json:"fraction_lost,omitempty"`
+	RoundTripTimeMs  float64  `json:"round_trip_time_ms,omitempty"`
+}
+
+// StreamDebugInfo provides comprehensive debug information for a virtual player stream.
+type StreamDebugInfo struct {
+	ID        string              `json:"id"`
+	Name      string              `json:"name"`
+	State     string              `json:"state"` // "idle", "dialing", "playing", "lingering", "paused"
+	IsPlaying bool                `json:"is_playing"`
+	IsGrouped bool                `json:"is_grouped"`
+	Volume    int                 `json:"volume"`
+	Muted     bool                `json:"muted"`
+	AudioPath AudioPathDebugInfo  `json:"audio_path"`
+	Producers []ProducerDebugInfo `json:"producers"`
+	Consumers []ConsumerDebugInfo `json:"consumers"`
+}
+
+// IsActive returns true if the stream is currently streaming, dialing, lingering, or active.
+func (s StreamDebugInfo) IsActive() bool {
+	return s.IsPlaying || s.State == "active" || s.State == "dialing" || s.State == "lingering" || s.State == "playing"
+}
+
 type callDiagnosticsSnapshot struct {
 	hasCall            bool
 	sessionState       string

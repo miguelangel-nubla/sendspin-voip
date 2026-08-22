@@ -26,6 +26,23 @@ type IngressConfig struct {
 	BufferMs int
 }
 
+type workerState struct {
+	client         *protocol.Client
+	connected      bool
+	codec          string
+	rate           int
+	channels       int
+	bitDepth       int
+	offeredFormats []string
+	exposedCodecs  []string
+	meta           domain.StreamMetadata
+	volume         int
+	isMuted        bool
+	chunksReceived uint64
+	bytesReceived  uint64
+	clockSync      *sendspinsync.ClockSync
+}
+
 type playerWorker struct {
 	cfg     domain.PlayerConfig
 	codecs  []domain.Codec
@@ -34,30 +51,13 @@ type playerWorker struct {
 	ctx     context.Context
 
 	statsMu sync.RWMutex
-	// client is written by the worker goroutine on every (re)connect and read by
-	// callers on the Ingress API surface, so it lives under statsMu like the rest
-	// of the worker's mutable state. Use setClient/getClient.
-	client          *protocol.Client
-	connected       bool
-	currentCodec    string
-	currentRate     int
-	currentChannels int
-	currentBitDepth int
-	offeredFormats  []string
-	exposedCodecs   []string
-	currentMeta     domain.StreamMetadata
-	currentVolume   int
-	isMuted         bool
-	chunksReceived  uint64
-	bytesReceived   uint64
-	// clockSync implements official Sendspin Kalman filter time synchronization.
-	clockSync *sendspinsync.ClockSync
+	state   workerState
 }
 
 // setClient publishes the protocol client for the current connection attempt.
 func (w *playerWorker) setClient(c *protocol.Client) {
 	w.statsMu.Lock()
-	w.client = c
+	w.state.client = c
 	w.statsMu.Unlock()
 }
 
@@ -65,31 +65,110 @@ func (w *playerWorker) setClient(c *protocol.Client) {
 func (w *playerWorker) getClient() *protocol.Client {
 	w.statsMu.RLock()
 	defer w.statsMu.RUnlock()
-	return w.client
+	return w.state.client
+}
+
+func (w *playerWorker) setConnected(connected bool) {
+	w.statsMu.Lock()
+	w.state.connected = connected
+	w.statsMu.Unlock()
 }
 
 func (w *playerWorker) sendSynchronizedState(client *protocol.Client) {
 	w.statsMu.RLock()
-	vol := w.currentVolume
-	muted := w.isMuted
+	vol := w.state.volume
+	muted := w.state.isMuted
 	w.statsMu.RUnlock()
 	_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
 }
 
 func (w *playerWorker) setVolume(client *protocol.Client, vol int) {
 	w.statsMu.Lock()
-	w.currentVolume = vol
-	muted := w.isMuted
+	w.state.volume = vol
+	muted := w.state.isMuted
 	w.statsMu.Unlock()
 	_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
 }
 
 func (w *playerWorker) setMuted(client *protocol.Client, muted bool) {
 	w.statsMu.Lock()
-	w.isMuted = muted
-	vol := w.currentVolume
+	w.state.isMuted = muted
+	vol := w.state.volume
 	w.statsMu.Unlock()
 	_ = client.SendState(protocol.PlayerState{State: "synchronized", Volume: vol, Muted: muted})
+}
+
+func (w *playerWorker) setFormatsAndCodecs(offered []string, exposed []string) {
+	w.statsMu.Lock()
+	w.state.offeredFormats = offered
+	w.state.exposedCodecs = exposed
+	w.statsMu.Unlock()
+}
+
+func (w *playerWorker) setStreamConnected(codec string, rate, channels, bitDepth int, offered []string) {
+	w.statsMu.Lock()
+	w.state.connected = true
+	w.state.codec = codec
+	w.state.rate = rate
+	w.state.channels = channels
+	w.state.bitDepth = bitDepth
+	w.state.offeredFormats = offered
+	w.statsMu.Unlock()
+}
+
+func (w *playerWorker) onStreamStart(codec string, rate, channels, bitDepth int) domain.StreamMetadata {
+	w.statsMu.Lock()
+	defer w.statsMu.Unlock()
+	w.state.codec = codec
+	w.state.rate = rate
+	w.state.channels = channels
+	w.state.bitDepth = bitDepth
+	w.state.meta.ProgressUpdated = time.Now()
+	return w.state.meta
+}
+
+func (w *playerWorker) onStreamEnd() {
+	w.statsMu.Lock()
+	w.state.meta.ProgressMs = 0
+	w.state.meta.ProgressUpdated = time.Time{}
+	w.statsMu.Unlock()
+}
+
+func (w *playerWorker) onMetadata(meta domain.StreamMetadata) {
+	w.statsMu.Lock()
+	w.state.meta = meta
+	w.statsMu.Unlock()
+}
+
+func (w *playerWorker) onAudioChunk(chunkLen int, serverTS int64) (time.Time, string, int, int, int) {
+	w.statsMu.Lock()
+	w.state.chunksReceived++
+	w.state.bytesReceived += uint64(chunkLen)
+	var playAt time.Time
+	if serverTS > 0 && w.state.clockSync != nil {
+		playAt = w.state.clockSync.ServerToLocalTime(serverTS)
+	} else {
+		playAt = time.Now()
+	}
+	codec := w.state.codec
+	rate := w.state.rate
+	channels := w.state.channels
+	bitDepth := w.state.bitDepth
+	w.statsMu.Unlock()
+	return playAt, codec, rate, channels, bitDepth
+}
+
+func (w *playerWorker) processTimeSync(clientTransmitted, serverReceived, serverTransmitted, clientReceived int64) {
+	w.statsMu.Lock()
+	if w.state.clockSync != nil {
+		w.state.clockSync.ProcessSyncResponse(
+			clientTransmitted,
+			serverReceived,
+			serverTransmitted,
+			clientReceived,
+		)
+	}
+	w.statsMu.Unlock()
 }
 
 // Ingress implements app.PlayerIngressPort using Sendspin wire protocol.
@@ -181,7 +260,7 @@ func (ing *Ingress) runDiscovery() {
 				allDown := true
 				for _, w := range ing.workers {
 					w.statsMu.RLock()
-					connected := w.connected
+					connected := w.state.connected
 					w.statsMu.RUnlock()
 					if connected {
 						allDown = false
@@ -208,7 +287,6 @@ func (ing *Ingress) runDiscovery() {
 }
 
 // RegisterPlayer spawns a virtual Sendspin player client.
-// RegisterPlayer creates and starts a virtual Sendspin player client.
 func (ing *Ingress) RegisterPlayer(player domain.PlayerConfig, handler app.PlayerEventHandler) error {
 	return ing.RegisterPlayerWithCodecs(player, nil, handler)
 }
@@ -224,11 +302,11 @@ func (ing *Ingress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs 
 	// If already registered with identical codecs and connected, skip
 	if existing, ok := ing.workers[player.ID]; ok {
 		existing.statsMu.RLock()
-		existingClient := existing.client
-		if existing.currentVolume > 0 {
-			initialVol = existing.currentVolume
+		existingClient := existing.state.client
+		if existing.state.volume > 0 {
+			initialVol = existing.state.volume
 		}
-		initialMuted = existing.isMuted
+		initialMuted = existing.state.isMuted
 		existing.statsMu.RUnlock()
 
 		if slices.Equal(existing.codecs, codecs) && existingClient != nil && existingClient.IsConnected() {
@@ -248,14 +326,16 @@ func (ing *Ingress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs 
 
 	ctx, cancel := context.WithCancel(ing.ctx)
 	worker := &playerWorker{
-		cfg:           player,
-		codecs:        codecs,
-		handler:       handler,
-		cancel:        cancel,
-		ctx:           ctx,
-		currentVolume: initialVol,
-		isMuted:       initialMuted,
-		clockSync:     sendspinsync.NewClockSync(),
+		cfg:     player,
+		codecs:  codecs,
+		handler: handler,
+		cancel:  cancel,
+		ctx:     ctx,
+		state: workerState{
+			volume:    initialVol,
+			isMuted:   initialMuted,
+			clockSync: sendspinsync.NewClockSync(),
+		},
 	}
 	ing.workers[player.ID] = worker
 
@@ -445,10 +525,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		for _, f := range supportedFormats {
 			offeredFmtStrings = append(offeredFmtStrings, fmt.Sprintf("%s %dHz %dch %dbit", strings.ToUpper(f.Codec), f.SampleRate, f.Channels, f.BitDepth))
 		}
-		w.statsMu.Lock()
-		w.offeredFormats = offeredFmtStrings
-		w.exposedCodecs = supportCodecs
-		w.statsMu.Unlock()
+		w.setFormatsAndCodecs(offeredFmtStrings, supportCodecs)
 
 		client := protocol.NewClient(protocol.Config{
 			ServerAddr:     serverAddr,
@@ -493,23 +570,15 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 			}
 		}
 
-		w.statsMu.Lock()
-		w.connected = true
-		w.currentCodec = primaryCodec
-		w.currentRate = primaryRate
-		w.currentChannels = primaryChannels
-		w.currentBitDepth = primaryBitDepth
-		w.offeredFormats = offeredFmtStrings
-		w.statsMu.Unlock()
-
+		w.setStreamConnected(primaryCodec, primaryRate, primaryChannels, primaryBitDepth, offeredFmtStrings)
 		w.setClient(client)
 		w.sendSynchronizedState(client)
+
 		w.statsMu.RLock()
-		initVol := w.currentVolume
+		initVol := w.state.volume
 		w.statsMu.RUnlock()
 		ing.logger.Info("Player client successfully connected to Music Assistant", "player_id", w.cfg.ID, "volume", initVol)
 
-		var currentMeta domain.StreamMetadata
 		var currentCodec = primaryCodec
 		var currentRate = primaryRate
 		var currentChannels = primaryChannels
@@ -525,17 +594,13 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 			select {
 			case <-w.ctx.Done():
 				timeSyncTicker.Stop()
-				w.statsMu.Lock()
-				w.connected = false
-				w.statsMu.Unlock()
+				w.setConnected(false)
 				_ = client.SendGoodbye("shutdown")
 				client.Close()
 				return
 			case <-done:
 				timeSyncTicker.Stop()
-				w.statsMu.Lock()
-				w.connected = false
-				w.statsMu.Unlock()
+				w.setConnected(false)
 				ing.logger.Warn("Sendspin player disconnected, will reconnect", "player_id", w.cfg.ID)
 				break eventLoop
 
@@ -543,17 +608,12 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				_ = client.SendTimeSync(time.Now().UnixMicro())
 
 			case timeResp := <-client.TimeSyncResp:
-				t4 := time.Now().UnixMicro()
-				w.statsMu.Lock()
-				if w.clockSync != nil {
-					w.clockSync.ProcessSyncResponse(
-						timeResp.ClientTransmitted,
-						timeResp.ServerReceived,
-						timeResp.ServerTransmitted,
-						t4,
-					)
-				}
-				w.statsMu.Unlock()
+				w.processTimeSync(
+					timeResp.ClientTransmitted,
+					timeResp.ServerReceived,
+					timeResp.ServerTransmitted,
+					time.Now().UnixMicro(),
+				)
 
 			case startMsg := <-client.StreamStart:
 				// Drain any remaining stale chunks in client.AudioChunks channel from previous stream/seek
@@ -564,17 +624,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					currentChannels = domain.NormalizeChannels(startMsg.Player.Channels, primaryChannels)
 					currentBitDepth = cmp.Or(startMsg.Player.BitDepth, 16)
 				}
-				w.statsMu.Lock()
-				w.currentCodec = currentCodec
-				w.currentRate = currentRate
-				w.currentChannels = currentChannels
-				w.currentBitDepth = currentBitDepth
-				w.statsMu.Unlock()
-
-				currentMeta.ProgressUpdated = time.Now()
-				w.statsMu.Lock()
-				w.currentMeta = currentMeta
-				w.statsMu.Unlock()
+				meta := w.onStreamStart(currentCodec, currentRate, currentChannels, currentBitDepth)
 
 				ing.logger.Info("Sendspin stream start received",
 					"player_id", w.cfg.ID,
@@ -582,18 +632,15 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					"sample_rate", currentRate,
 					"channels", currentChannels,
 					"bit_depth", currentBitDepth,
-					"title", currentMeta.Title,
-					"progress_ms", currentMeta.ProgressMs,
+					"title", meta.Title,
+					"progress_ms", meta.ProgressMs,
 				)
 				w.sendSynchronizedState(client)
-				w.handler.OnStreamStart(w.cfg.ID, currentMeta)
+				w.handler.OnStreamStart(w.cfg.ID, meta)
 
 			case <-client.StreamEnd:
 				ing.logger.Info("Sendspin stream end received", "player_id", w.cfg.ID)
-				w.statsMu.Lock()
-				w.currentMeta.ProgressMs = 0
-				w.currentMeta.ProgressUpdated = time.Time{}
-				w.statsMu.Unlock()
+				w.onStreamEnd()
 				w.handler.OnStreamEnd(w.cfg.ID)
 
 			case <-client.StreamClear:
@@ -604,11 +651,8 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 			case stateMsg := <-client.ServerState:
 				if stateMsg.Metadata != nil {
 					meta, pbState := parseServerMetadata(stateMsg.Metadata)
-					currentMeta = meta
-					w.statsMu.Lock()
-					w.currentMeta = currentMeta
-					w.statsMu.Unlock()
-					w.handler.OnMetadata(w.cfg.ID, currentMeta)
+					w.onMetadata(meta)
+					w.handler.OnMetadata(w.cfg.ID, meta)
 
 					if pbState != "" {
 						w.handler.OnPlaybackState(w.cfg.ID, pbState)
@@ -632,22 +676,15 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				}
 
 			case chunk := <-client.AudioChunks:
-				w.statsMu.Lock()
-				w.chunksReceived++
-				w.bytesReceived += uint64(len(chunk.Data))
-				w.statsMu.Unlock()
-
-				playAt := resolvePlayAt(w, chunk.Timestamp)
+				playAt, codec, rate, channels, bitDepth := w.onAudioChunk(len(chunk.Data), chunk.Timestamp)
 				audioChunk := decodeIncomingAudioChunk(
-					chunk, currentCodec, currentRate, currentChannels, currentBitDepth, playAt,
+					chunk, codec, rate, channels, bitDepth, playAt,
 				)
 				w.handler.OnAudioChunk(w.cfg.ID, audioChunk)
 			}
 		}
 
-		w.statsMu.Lock()
-		w.connected = false
-		w.statsMu.Unlock()
+		w.setConnected(false)
 		client.Close()
 		consecutiveFails++
 		if consecutiveFails >= 3 && strings.EqualFold(ing.config.Server, "auto") {
@@ -655,21 +692,6 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		}
 		time.Sleep(2 * time.Second)
 	}
-}
-
-func resolvePlayAt(w *playerWorker, serverTS int64) time.Time {
-	if serverTS <= 0 {
-		return time.Now()
-	}
-	w.statsMu.RLock()
-	cs := w.clockSync
-	w.statsMu.RUnlock()
-
-	if cs != nil {
-		return cs.ServerToLocalTime(serverTS)
-	}
-
-	return time.Now()
 }
 
 func (ing *Ingress) clearServerAddr(current string) {
@@ -791,16 +813,16 @@ func (ing *Ingress) GetPlayerStats(playerID string) (app.IngressPlayerStats, boo
 
 	return app.IngressPlayerStats{
 		ServerAddr:     serverAddr,
-		Connected:      w.connected,
-		Codec:          w.currentCodec,
-		SampleRate:     w.currentRate,
-		Channels:       w.currentChannels,
-		BitDepth:       w.currentBitDepth,
-		OfferedFormats: w.offeredFormats,
-		ExposedCodecs:  w.exposedCodecs,
-		Metadata:       w.currentMeta,
-		ChunksReceived: w.chunksReceived,
-		BytesReceived:  w.bytesReceived,
+		Connected:      w.state.connected,
+		Codec:          w.state.codec,
+		SampleRate:     w.state.rate,
+		Channels:       w.state.channels,
+		BitDepth:       w.state.bitDepth,
+		OfferedFormats: w.state.offeredFormats,
+		ExposedCodecs:  w.state.exposedCodecs,
+		Metadata:       w.state.meta,
+		ChunksReceived: w.state.chunksReceived,
+		BytesReceived:  w.state.bytesReceived,
 	}, true
 }
 
