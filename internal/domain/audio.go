@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 	"time"
@@ -156,10 +157,7 @@ func NormalizeChannels(channels, fallback int) int {
 
 // FormatAudioDescription returns a human-readable stream description for arbitrary audio formats.
 func FormatAudioDescription(codec string, sampleRate, channels, bitDepth int) string {
-	codec = strings.ToUpper(strings.TrimSpace(codec))
-	if codec == "" {
-		codec = "PCM"
-	}
+	codec = cmp.Or(strings.ToUpper(strings.TrimSpace(codec)), "PCM")
 	channels = NormalizeChannels(channels, 2)
 	if sampleRate <= 0 {
 		sampleRate = 48000

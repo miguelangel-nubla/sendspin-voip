@@ -55,7 +55,6 @@ type activeCallState struct {
 	dialog SIPDialog
 
 	answered               bool
-	done                   chan struct{}
 	lingerTimer            *time.Timer
 	streamStartProgressSec float64
 	// lingerGen is bumped whenever a linger timer is armed or cancelled. A timer
@@ -357,7 +356,6 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 	callState := &activeCallState{
 		session:                session,
 		rtpSession:             rtpSess,
-		done:                   make(chan struct{}),
 		streamStartProgressSec: startProgSec,
 	}
 	s.activeCalls.Store(playerID, callState)
@@ -586,9 +584,9 @@ func (s *BridgeService) getEffectiveVolume(playerID string) int {
 }
 
 func (s *BridgeService) updatePlayerState(playerID string, mutator func(p *domain.Player)) {
-	var vol int = 100
-	var muted bool
-	var effectiveVol int = 100
+	vol := 100
+	muted := false
+	effectiveVol := 100
 
 	s.playersMu.Lock()
 	if p, ok := s.players[playerID]; ok {
@@ -648,7 +646,6 @@ func (s *BridgeService) terminateCall(playerID string, releaseArbiter bool, drai
 	call := val.(*activeCallState)
 
 	call.cancelLinger()
-	call.session.SetState(domain.StateTerminating)
 	call.session.Close()
 
 	teardown := func() {
@@ -665,7 +662,6 @@ func (s *BridgeService) terminateCall(playerID string, releaseArbiter bool, drai
 		if releaseArbiter {
 			s.arbiter.ReleaseTarget(call.session)
 		}
-		call.session.SetState(domain.StateTerminated)
 	}
 
 	if async {
@@ -719,16 +715,16 @@ func (s *BridgeService) Shutdown() {
 // GetStreamsDebugInfo returns debug information for all registered virtual player streams.
 func (s *BridgeService) GetStreamsDebugInfo() map[string]StreamDebugInfo {
 	s.playersMu.RLock()
-	players := make([]*domain.Player, 0, len(s.players))
-	for _, p := range s.players {
-		players = append(players, p)
+	playerIDs := make([]string, 0, len(s.players))
+	for id := range s.players {
+		playerIDs = append(playerIDs, id)
 	}
 	s.playersMu.RUnlock()
 
-	result := make(map[string]StreamDebugInfo, len(players))
-	for _, p := range players {
-		if info, ok := s.GetStreamDebugInfo(p.Config.ID); ok {
-			result[p.Config.ID] = info
+	result := make(map[string]StreamDebugInfo, len(playerIDs))
+	for _, id := range playerIDs {
+		if info, ok := s.GetStreamDebugInfo(id); ok {
+			result[id] = info
 		}
 	}
 	return result

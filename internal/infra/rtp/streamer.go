@@ -1,6 +1,7 @@
 package rtp
 
 import (
+	"cmp"
 	"fmt"
 	"log/slog"
 	"net"
@@ -52,10 +53,7 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	activeCodec := codec
-	if activeCodec == "" {
-		activeCodec = domain.CodecG722
-	}
+	activeCodec := cmp.Or(codec, domain.CodecG722)
 
 	// 1. Audio Path (DSP, conversion engine & raw timeline)
 	audioPath := NewAudioPath(s.transcoderFactory(), activeCodec, 100)

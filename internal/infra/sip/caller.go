@@ -1,6 +1,7 @@
 package sip
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -61,18 +62,8 @@ func NewCaller(logger *slog.Logger, cfg CallerConfig) (*Caller, error) {
 		cfg.Username = "sendspin"
 	}
 
-	localIP := cfg.LocalIP
-	if localIP == "" {
-		localIP = detectOutboundIP(cfg.Server).String()
-	}
-
-	fromDomain := cfg.Domain
-	if fromDomain == "" {
-		fromDomain = cfg.Server
-	}
-	if fromDomain == "" {
-		fromDomain = localIP
-	}
+	localIP := cmp.Or(cfg.LocalIP, detectOutboundIP(cfg.Server).String())
+	fromDomain := cmp.Or(cfg.Domain, cfg.Server, localIP)
 	fromDomain = strings.TrimPrefix(fromDomain, "sip:")
 	if h, _, err := net.SplitHostPort(fromDomain); err == nil {
 		fromDomain = h
@@ -203,11 +194,7 @@ func (c *Caller) registrationLoop(ctx context.Context) {
 }
 
 func (c *Caller) register(ctx context.Context) error {
-	domainHost := c.config.Domain
-	if domainHost == "" {
-		domainHost = c.config.Server
-	}
-	domainHost = domain.NormalizeSIPTarget(domainHost)
+	domainHost := domain.NormalizeSIPTarget(cmp.Or(c.config.Domain, c.config.Server))
 
 	var recipientURI sip.Uri
 	if err := sip.ParseUri(domainHost, &recipientURI); err != nil {
@@ -395,14 +382,8 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 	}
 
 	// 2. Build Auto-Answer headers
-	preset := player.AutoAnswer
-	if preset == "" {
-		preset = c.config.AutoAnswerPreset
-	}
-	customHeader := player.CustomAutoAnswerHeader
-	if customHeader == "" {
-		customHeader = c.config.CustomAutoAnswerHeader
-	}
+	preset := cmp.Or(player.AutoAnswer, c.config.AutoAnswerPreset)
+	customHeader := cmp.Or(player.CustomAutoAnswerHeader, c.config.CustomAutoAnswerHeader)
 	headers := c.buildAutoAnswerHeaders(preset, customHeader)
 	headers = append(headers, sip.NewHeader("Content-Type", "application/sdp"))
 

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 )
@@ -60,13 +61,7 @@ type Player struct {
 
 // ClampVolume restricts a volume percentage to the valid range [0, 100].
 func ClampVolume(v int) int {
-	if v < 0 {
-		return 0
-	}
-	if v > 100 {
-		return 100
-	}
-	return v
+	return min(max(v, 0), 100)
 }
 
 // FormatVolumeGain formats a volume percentage (and mute status) into a descriptive string with dB equivalent.
@@ -99,9 +94,7 @@ func NewPlayer(cfg PlayerConfig) (*Player, error) {
 	if cfg.ID == "" {
 		return nil, fmt.Errorf("player id is required")
 	}
-	if cfg.Name == "" {
-		cfg.Name = cfg.ID
-	}
+	cfg.Name = cmp.Or(cfg.Name, cfg.ID)
 	if cfg.SIPTarget == "" {
 		return nil, fmt.Errorf("player %q requires a sip_target", cfg.ID)
 	}
@@ -110,9 +103,7 @@ func NewPlayer(cfg PlayerConfig) (*Player, error) {
 		return nil, fmt.Errorf("player %q requires a valid sip_target", cfg.ID)
 	}
 	// Empty Codec means "auto": use downstream discovery order (no forced preference).
-	if cfg.AutoAnswer == "" {
-		cfg.AutoAnswer = AutoAnswerDefault
-	}
+	cfg.AutoAnswer = cmp.Or(cfg.AutoAnswer, AutoAnswerDefault)
 	if cfg.DefaultVolume <= 0 || cfg.DefaultVolume > 100 {
 		cfg.DefaultVolume = 100
 	}

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 	"sync"
@@ -39,11 +40,8 @@ type TargetArbiter struct {
 
 // NewTargetArbiter creates a new target arbiter.
 func NewTargetArbiter(policy ConflictPolicy) *TargetArbiter {
-	if policy == "" {
-		policy = ConflictPolicyPreemptHigher
-	}
 	return &TargetArbiter{
-		policy:         policy,
+		policy:         cmp.Or(policy, ConflictPolicyPreemptHigher),
 		activeSessions: make(map[string]*CallSession),
 	}
 }
@@ -65,16 +63,11 @@ func (a *TargetArbiter) RequestTarget(newSession *CallSession) (*CallSession, er
 
 	// Target is currently busy with an active/dialing session. Evaluate preemption.
 	shouldPreempt := false
-
 	switch a.policy {
 	case ConflictPolicyPreemptAlways:
-		if newSession.Priority >= current.Priority {
-			shouldPreempt = true
-		}
+		shouldPreempt = newSession.Priority >= current.Priority
 	case ConflictPolicyPreemptHigher, ConflictPolicyPreemptAnnouncements:
-		if newSession.Priority > current.Priority {
-			shouldPreempt = true
-		}
+		shouldPreempt = newSession.Priority > current.Priority
 	case ConflictPolicyBusy:
 		shouldPreempt = false
 	}

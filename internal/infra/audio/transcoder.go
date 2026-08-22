@@ -203,13 +203,7 @@ func (t *Transcoder) transcodeOpus(samples []int32, srcRate, srcChannels, volume
 func clampToInt16(samples []int32) []int16 {
 	pcm16 := make([]int16, len(samples))
 	for i, s := range samples {
-		val := s
-		if val > 32767 {
-			val = 32767
-		} else if val < -32768 {
-			val = -32768
-		}
-		pcm16[i] = int16(val)
+		pcm16[i] = int16(min(max(s, -32768), 32767))
 	}
 	return pcm16
 }

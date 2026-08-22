@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -235,7 +236,7 @@ func (ing *Ingress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs 
 		initialMuted = existing.isMuted
 		existing.statsMu.RUnlock()
 
-		if codecsEqual(existing.codecs, codecs) && existingClient != nil && existingClient.IsConnected() {
+		if slices.Equal(existing.codecs, codecs) && existingClient != nil && existingClient.IsConnected() {
 			return nil
 		}
 
@@ -282,18 +283,6 @@ func (ing *Ingress) UnregisterPlayer(playerID string) error {
 		ing.logger.Info("Unregistered virtual player from Music Assistant", "player_id", playerID)
 	}
 	return nil
-}
-
-func codecsEqual(a, b []domain.Codec) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func drainChannel[T any](ch <-chan T) {

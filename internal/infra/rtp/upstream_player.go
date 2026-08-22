@@ -1,6 +1,7 @@
 package rtp
 
 import (
+	"slices"
 	"sync"
 	"time"
 
@@ -81,7 +82,7 @@ func (u *UpstreamPlayer) Push(chunk domain.AudioChunk) bool {
 			idx = 0
 		}
 	}
-	u.chunks = append(u.chunks[:idx], append([]domain.AudioChunk{chunk}, u.chunks[idx:]...)...)
+	u.chunks = slices.Insert(u.chunks, idx, chunk)
 	if idx < u.readIdx {
 		u.readIdx++
 	}

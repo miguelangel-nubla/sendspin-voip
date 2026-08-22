@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -165,10 +166,22 @@ func DefaultConfig() *AppConfig {
 	}
 }
 
-func applyEnvOverrides(cfg *AppConfig) {
-	if v := os.Getenv("LOG_LEVEL"); v != "" {
-		cfg.LogLevel = v
+func setEnvString(target *string, envVar string) {
+	if v := os.Getenv(envVar); v != "" {
+		*target = v
 	}
+}
+
+func setEnvInt(target *int, envVar string) {
+	if v := os.Getenv(envVar); v != "" {
+		if val, err := strconv.Atoi(v); err == nil {
+			*target = val
+		}
+	}
+}
+
+func applyEnvOverrides(cfg *AppConfig) {
+	setEnvString(&cfg.LogLevel, "LOG_LEVEL")
 	if v := os.Getenv("HTTP_LISTEN"); v != "" {
 		cfg.HTTP.Listen = v
 	} else if v := os.Getenv("PORT"); v != "" {
@@ -177,56 +190,26 @@ func applyEnvOverrides(cfg *AppConfig) {
 		}
 		cfg.HTTP.Listen = v
 	}
-	if v := os.Getenv("HTTP_API_TOKEN"); v != "" {
-		cfg.HTTP.APIToken = v
-	}
-	if v := os.Getenv("STATE_FILE"); v != "" {
-		cfg.StateFile = v
-	}
+	setEnvString(&cfg.HTTP.APIToken, "HTTP_API_TOKEN")
+	setEnvString(&cfg.StateFile, "STATE_FILE")
 	if v := os.Getenv("HTTP_ENABLE_PPROF"); v != "" {
 		if val, err := strconv.ParseBool(v); err == nil {
 			cfg.HTTP.EnablePprof = val
 		}
 	}
-	if v := os.Getenv("SIP_SERVER"); v != "" {
-		cfg.SIP.Server = v
-	}
-	if v := os.Getenv("SIP_USERNAME"); v != "" {
-		cfg.SIP.Username = v
-	}
-	if v := os.Getenv("SIP_PASSWORD"); v != "" {
-		cfg.SIP.Password = v
-	}
-	if v := os.Getenv("SIP_DOMAIN"); v != "" {
-		cfg.SIP.Domain = v
-	}
-	if v := os.Getenv("SIP_LOCAL_IP"); v != "" {
-		cfg.SIP.LocalIP = v
-	}
-	if v := os.Getenv("SENDSPIN_SERVER"); v != "" {
-		cfg.Sendspin.Server = v
-	}
+	setEnvString(&cfg.SIP.Server, "SIP_SERVER")
+	setEnvString(&cfg.SIP.Username, "SIP_USERNAME")
+	setEnvString(&cfg.SIP.Password, "SIP_PASSWORD")
+	setEnvString(&cfg.SIP.Domain, "SIP_DOMAIN")
+	setEnvString(&cfg.SIP.LocalIP, "SIP_LOCAL_IP")
+	setEnvString(&cfg.SIP.Transport, "SIP_TRANSPORT")
+	setEnvInt(&cfg.SIP.LocalSIPPort, "SIP_LOCAL_SIP_PORT")
+	setEnvString(&cfg.Sendspin.Server, "SENDSPIN_SERVER")
 	if v := os.Getenv("TARGET_CONFLICT_POLICY"); v != "" {
 		cfg.Bridge.ConflictPolicy = domain.ConflictPolicy(strings.ToLower(strings.TrimSpace(v)))
 	}
-	if v := os.Getenv("DRAIN_DELAY_MS"); v != "" {
-		if val, err := strconv.Atoi(v); err == nil {
-			cfg.Bridge.DrainDelayMs = val
-		}
-	}
-	if v := os.Getenv("SIP_LOCAL_SIP_PORT"); v != "" {
-		if val, err := strconv.Atoi(v); err == nil {
-			cfg.SIP.LocalSIPPort = val
-		}
-	}
-	if v := os.Getenv("SIP_TRANSPORT"); v != "" {
-		cfg.SIP.Transport = v
-	}
-	if v := os.Getenv("IDLE_HANGUP_DELAY_MS"); v != "" {
-		if val, err := strconv.Atoi(v); err == nil {
-			cfg.Bridge.IdleHangupDelayMs = val
-		}
-	}
+	setEnvInt(&cfg.Bridge.DrainDelayMs, "DRAIN_DELAY_MS")
+	setEnvInt(&cfg.Bridge.IdleHangupDelayMs, "IDLE_HANGUP_DELAY_MS")
 }
 
 // Validate checks configuration sanity and normalizes enum-valued fields.
@@ -235,9 +218,7 @@ func (c *AppConfig) Validate() error {
 		c.StateFile = DefaultStateFilePath()
 	}
 
-	if c.SIP.Transport == "" {
-		c.SIP.Transport = "udp"
-	}
+	c.SIP.Transport = cmp.Or(c.SIP.Transport, "udp")
 	switch strings.ToLower(strings.TrimSpace(c.SIP.Transport)) {
 	case "udp", "tcp":
 		c.SIP.Transport = strings.ToLower(strings.TrimSpace(c.SIP.Transport))
@@ -307,25 +288,16 @@ func (c *AppConfig) ToDomainPlayerConfigs() ([]domain.PlayerConfig, error) {
 				return nil, fmt.Errorf("player %s: %w", p.ID, err)
 			}
 		}
-		if autoAnswer == "" {
-			autoAnswer = domain.AutoAnswerDefault
-		}
+		autoAnswer = cmp.Or(autoAnswer, domain.AutoAnswerDefault)
 
-		vol := p.DefaultVolume
-		if vol <= 0 {
-			vol = 100
-		} else {
-			vol = domain.ClampVolume(vol)
-		}
-
-		name := p.Name
-		if name == "" {
-			name = p.ID
+		vol := 100
+		if p.DefaultVolume > 0 {
+			vol = domain.ClampVolume(p.DefaultVolume)
 		}
 
 		result[i] = domain.PlayerConfig{
 			ID:                     p.ID,
-			Name:                   name,
+			Name:                   cmp.Or(p.Name, p.ID),
 			SIPTarget:              p.SIPTarget,
 			Codec:                  codec,
 			AutoAnswer:             autoAnswer,

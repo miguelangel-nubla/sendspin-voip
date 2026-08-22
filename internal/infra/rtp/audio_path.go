@@ -1,6 +1,7 @@
 package rtp
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 	"sync"
@@ -175,15 +176,9 @@ func (a *AudioPath) processChunkLocked(chunk domain.AudioChunk) error {
 		inCodec = "opus"
 	}
 
-	inRate := chunk.SampleRate
-	if inRate <= 0 {
-		inRate = 48000
-	}
+	inRate := cmp.Or(chunk.SampleRate, 48000)
 	inChannels := domain.NormalizeChannels(chunk.Channels, 2)
-	inBitDepth := chunk.BitDepth
-	if inBitDepth <= 0 {
-		inBitDepth = 16
-	}
+	inBitDepth := cmp.Or(chunk.BitDepth, 16)
 
 	a.ingressRawCodec = inCodec
 	a.ingressRawRate = inRate
@@ -494,18 +489,9 @@ func (a *AudioPath) buildPathDiagnosticsLocked() (string, []string) {
 		return "", nil
 	}
 
-	inRate := a.pathIngressRate
-	if inRate <= 0 {
-		inRate = 48000
-	}
-	inChannels := a.pathIngressChannels
-	if inChannels <= 0 {
-		inChannels = 2
-	}
-	inCodec := a.pathIngressCodec
-	if inCodec == "" {
-		inCodec = "pcm"
-	}
+	inRate := cmp.Or(a.pathIngressRate, 48000)
+	inChannels := cmp.Or(a.pathIngressChannels, 2)
+	inCodec := cmp.Or(a.pathIngressCodec, "pcm")
 
 	outCh := 1
 	if a.codec == domain.CodecOpus && inChannels == 2 {
