@@ -199,6 +199,11 @@ type StreamDebugInfo struct {
 	Consumers []ConsumerDebugInfo `json:"consumers"`
 }
 
+// IsActive returns true if the stream is currently streaming, dialing, lingering, or active.
+func (s StreamDebugInfo) IsActive() bool {
+	return s.IsPlaying || s.State == "active" || s.State == "dialing" || s.State == "lingering" || s.State == "playing"
+}
+
 // SIPDialog represents an active SIP call dialog.
 type SIPDialog interface {
 	// RemoteRTPAddr returns the remote IP and RTP port parsed from the SIP 200 OK SDP answer.

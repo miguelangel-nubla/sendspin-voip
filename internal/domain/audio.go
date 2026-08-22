@@ -251,3 +251,57 @@ func (c Codec) SDPDescription() string {
 	return fmt.Sprintf("%s (pt=%d, clock=%dHz)", strings.ToUpper(string(c)), c.PayloadType(), c.RTPClockRate())
 }
 
+// FullName returns the expanded title for the codec used in documentation and web UI.
+func (c Codec) FullName() string {
+	switch c {
+	case CodecOpus:
+		return "Opus Interactive Audio"
+	case CodecL16:
+		return "L16 Linear PCM (Uncompressed)"
+	case CodecG722:
+		return "G.722 HD Voice"
+	case CodecPCMU:
+		return "G.711 µ-law (PCMU)"
+	case CodecPCMA:
+		return "G.711 A-law (PCMA)"
+	default:
+		return c.DisplayName()
+	}
+}
+
+// SDPEncodingName returns the standard RFC 4566 / 3551 rtpmap encoding parameter (e.g. "opus/48000/2").
+func (c Codec) SDPEncodingName() string {
+	switch c {
+	case CodecOpus:
+		return "opus/48000/2"
+	case CodecL16:
+		return "L16/48000/1"
+	case CodecG722:
+		return "G722/8000"
+	case CodecPCMU:
+		return "PCMU/8000"
+	case CodecPCMA:
+		return "PCMA/8000"
+	default:
+		return string(c)
+	}
+}
+
+// LongDescription returns a descriptive summary of the codec capabilities.
+func (c Codec) LongDescription() string {
+	switch c {
+	case CodecOpus:
+		return "High fidelity multi-room audio with zero-copy passthrough when volume is 100%"
+	case CodecL16:
+		return "Studio master uncompressed linear PCM audio streaming"
+	case CodecG722:
+		return "Wideband HD VoIP codec with crystal clear speech synthesis"
+	case CodecPCMU:
+		return "Universal standard telephony codec (North America/Japan standard)"
+	case CodecPCMA:
+		return "Universal standard telephony codec (International/European standard)"
+	default:
+		return ""
+	}
+}
+

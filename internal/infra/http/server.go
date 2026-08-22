@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/miguelangel-nubla/sendspin-voip/internal/app"
+	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
 )
 
 // ServerConfig holds HTTP server configuration parameters.
@@ -289,7 +290,7 @@ func (s *Server) handleAPIInfo(w http.ResponseWriter, r *http.Request) {
 	streams := s.bridgeService.GetStreamsDebugInfo()
 	activeCount := 0
 	for _, st := range streams {
-		if st.State == "playing" || st.State == "active" || st.State == "dialing" || st.State == "lingering" {
+		if st.IsActive() {
 			activeCount++
 		}
 	}
@@ -317,67 +318,24 @@ func (s *Server) handleAPIInfo(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(info)
 }
 
-// handleAPICodecs returns supported audio codecs.
+// handleAPICodecs returns supported audio codecs dynamically from domain preferences.
 func (s *Server) handleAPICodecs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	codecs := []map[string]any{
-		{
-			"codec":             "opus",
-			"name":              "Opus Interactive Audio",
-			"sdp_name":          "opus/48000/2",
-			"rtp_clock_rate":    48000,
-			"audio_sample_rate": 48000,
-			"payload_type":      96,
-			"bitrate_kbps":      128,
-			"channels":          2,
-			"description":       "High fidelity multi-room audio with zero-copy passthrough when volume is 100%",
-		},
-		{
-			"codec":             "l16",
-			"name":              "L16 Linear PCM (Uncompressed)",
-			"sdp_name":          "L16/48000/1",
-			"rtp_clock_rate":    48000,
-			"audio_sample_rate": 48000,
-			"payload_type":      97,
-			"bitrate_kbps":      768,
-			"channels":          1,
-			"description":       "Studio master uncompressed linear PCM audio streaming",
-		},
-		{
-			"codec":             "g722",
-			"name":              "G.722 HD Voice",
-			"sdp_name":          "G722/8000",
-			"rtp_clock_rate":    8000,
-			"audio_sample_rate": 16000,
-			"payload_type":      9,
-			"bitrate_kbps":      64,
-			"channels":          1,
-			"description":       "Wideband HD VoIP codec with crystal clear speech synthesis",
-		},
-		{
-			"codec":             "pcmu",
-			"name":              "G.711 µ-law (PCMU)",
-			"sdp_name":          "PCMU/8000",
-			"rtp_clock_rate":    8000,
-			"audio_sample_rate": 8000,
-			"payload_type":      0,
-			"bitrate_kbps":      64,
-			"channels":          1,
-			"description":       "Universal standard telephony codec (North America/Japan standard)",
-		},
-		{
-			"codec":             "pcma",
-			"name":              "G.711 A-law (PCMA)",
-			"sdp_name":          "PCMA/8000",
-			"rtp_clock_rate":    8000,
-			"audio_sample_rate": 8000,
-			"payload_type":      8,
-			"bitrate_kbps":      64,
-			"channels":          1,
-			"description":       "Universal standard telephony codec (International/European standard)",
-		},
+	codecs := make([]map[string]any, 0, len(domain.DefaultCodecPreferences))
+	for _, c := range domain.DefaultCodecPreferences {
+		codecs = append(codecs, map[string]any{
+			"codec":             string(c),
+			"name":              c.FullName(),
+			"sdp_name":          c.SDPEncodingName(),
+			"rtp_clock_rate":    c.RTPClockRate(),
+			"audio_sample_rate": c.SampleRate(),
+			"payload_type":      c.PayloadType(),
+			"bitrate_kbps":      c.DefaultBitrateKbps(),
+			"channels":          c.DefaultChannels(),
+			"description":       c.LongDescription(),
+		})
 	}
 
 	_ = json.NewEncoder(w).Encode(map[string]any{

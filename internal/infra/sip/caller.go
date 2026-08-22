@@ -39,6 +39,7 @@ type Caller struct {
 	server        *sipgo.Server
 	dialogCache   *sipgo.DialogClientCache
 	localIP       string
+	fromDomain    string
 	activeDialogs map[string]*DialogWrapper
 	registered    bool
 	lastRegister  time.Time
@@ -65,10 +66,23 @@ func NewCaller(logger *slog.Logger, cfg CallerConfig) (*Caller, error) {
 		localIP = detectOutboundIP(cfg.Server).String()
 	}
 
+	fromDomain := cfg.Domain
+	if fromDomain == "" {
+		fromDomain = cfg.Server
+	}
+	if fromDomain == "" {
+		fromDomain = localIP
+	}
+	fromDomain = strings.TrimPrefix(fromDomain, "sip:")
+	if h, _, err := net.SplitHostPort(fromDomain); err == nil {
+		fromDomain = h
+	}
+
 	return &Caller{
 		logger:        logger,
 		config:        cfg,
 		localIP:       localIP,
+		fromDomain:    fromDomain,
 		activeDialogs: make(map[string]*DialogWrapper),
 	}, nil
 }
@@ -394,18 +408,6 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 	headers = append(headers, sip.NewHeader("Content-Type", "application/sdp"))
 
 	fromUser := c.config.Username
-	fromDomain := c.config.Domain
-	if fromDomain == "" {
-		fromDomain = c.config.Server
-	}
-	if fromDomain == "" {
-		fromDomain = c.localIP
-	}
-	fromDomain = strings.TrimPrefix(fromDomain, "sip:")
-	if h, _, err := net.SplitHostPort(fromDomain); err == nil {
-		fromDomain = h
-	}
-
 	displayName := player.Name
 	if displayName == "" {
 		displayName = fromUser
@@ -415,7 +417,7 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 		DisplayName: displayName,
 		Address: sip.Uri{
 			User: fromUser,
-			Host: fromDomain,
+			Host: c.fromDomain,
 		},
 		Params: sip.HeaderParams{sip.HeaderKV{K: "tag", V: sip.GenerateTagN(16)}},
 	}
