@@ -616,9 +616,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					ing.logger.Warn("Failed to build Opus decoder for stream format",
 						"player_id", w.cfg.ID, "channels", currentChannels, "err", err)
 				}
-				if currentMeta.ProgressUpdated.IsZero() {
-					currentMeta.ProgressUpdated = time.Now()
-				}
+				currentMeta.ProgressUpdated = time.Now()
 				w.statsMu.Lock()
 				w.currentMeta = currentMeta
 				w.statsMu.Unlock()
@@ -680,6 +678,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					w.statsMu.Lock()
 					w.currentMeta = currentMeta
 					w.statsMu.Unlock()
+					w.handler.OnMetadata(w.cfg.ID, currentMeta)
 
 					if stateMsg.Metadata.Progress != nil {
 						if stateMsg.Metadata.Progress.PlaybackSpeed == 0 {

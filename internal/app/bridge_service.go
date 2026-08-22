@@ -427,6 +427,23 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 	}
 }
 
+// OnMetadata handles real-time track metadata updates from Music Assistant (e.g. gapless transitions).
+func (s *BridgeService) OnMetadata(playerID string, meta domain.StreamMetadata) {
+	if val, ok := s.activeCalls.Load(playerID); ok {
+		call := val.(*activeCallState)
+		call.mu.Lock()
+		call.session.Metadata = meta
+		startProgSec := float64(meta.ProgressMs) / 1000.0
+		call.streamStartProgressSec = startProgSec
+		call.mu.Unlock()
+		s.logger.Debug("Updated track metadata on active call session",
+			"player_id", playerID,
+			"title", meta.Title,
+			"artist", meta.Artist,
+		)
+	}
+}
+
 // OnStreamClear handles buffer flushing requested by Music Assistant (e.g. on seek).
 func (s *BridgeService) OnStreamClear(playerID string) {
 	if val, ok := s.activeCalls.Load(playerID); ok {

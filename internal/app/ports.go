@@ -237,6 +237,7 @@ type PlayerIngressPort interface {
 // PlayerEventHandler defines the callbacks triggered by incoming Sendspin player events.
 type PlayerEventHandler interface {
 	OnStreamStart(playerID string, meta domain.StreamMetadata)
+	OnMetadata(playerID string, meta domain.StreamMetadata)
 	OnStreamClear(playerID string)
 	OnPlaybackState(playerID string, state string)
 	OnAudioChunk(playerID string, chunk domain.AudioChunk)

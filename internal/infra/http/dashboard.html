@@ -779,7 +779,7 @@
       document.getElementById(`track-artist-${id}`).textContent = artist ? (album ? `${artist} • ${album}` : artist) : (album || 'Ready for stream');
 
       const trackDur = prod.track_duration_sec || 0;
-      const trackProg = (prod.track_progress_sec != null && prod.track_progress_sec > 0) ? prod.track_progress_sec : (isPlaying ? (cons.duration_sec || 0) : 0);
+      const trackProg = prod.track_progress_sec || 0;
 
       document.getElementById(`tc-${id}`).textContent = formatDuration(trackProg);
       document.getElementById(`track-timing-${id}`).textContent = trackDur > 0 ? `${formatDuration(trackProg)} / ${formatDuration(trackDur)}` : formatDuration(trackProg);
