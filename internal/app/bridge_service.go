@@ -317,22 +317,22 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		"priority", playerCfg.Priority,
 	)
 
-	// 2. Concurrency & Preemption check
+	// 2. Allocate local RTP socket before claiming arbiter target
+	rtpSess, err := s.rtpStreamer.CreateSession(playerCfg.Codec)
+	if err != nil {
+		s.logger.Error("Failed to create RTP session", "err", err)
+		return
+	}
+
+	// 3. Concurrency & Preemption check
 	preempted, err := s.arbiter.RequestTarget(session)
 	if err != nil {
+		_ = rtpSess.DrainAndClose(0)
 		s.logger.Warn("Cannot start SIP call: target conflict",
 			"player_id", playerID,
 			"target", playerCfg.SIPTarget,
 			"err", err,
 		)
-		return
-	}
-
-	// 3. Allocate local RTP socket before tearing down any preempted call
-	rtpSess, err := s.rtpStreamer.CreateSession(playerCfg.Codec)
-	if err != nil {
-		s.logger.Error("Failed to create RTP session", "err", err)
-		s.arbiter.ReleaseTarget(session)
 		return
 	}
 

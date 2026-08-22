@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"testing"
@@ -141,11 +142,16 @@ func (m *mockRTPSession) DrainAndClose(drainDelay time.Duration) error {
 type mockRTPStreamer struct {
 	mu       sync.Mutex
 	sessions []*mockRTPSession
+	failNext bool
 }
 
 func (m *mockRTPStreamer) CreateSession(codec domain.Codec) (RTPSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.failNext {
+		m.failNext = false
+		return nil, errors.New("port pool exhausted")
+	}
 	sess := &mockRTPSession{localPort: 10002 + len(m.sessions)*2}
 	m.sessions = append(m.sessions, sess)
 	return sess, nil
@@ -924,6 +930,82 @@ func TestBridgeService_TerminateCallState_IdentityCheck(t *testing.T) {
 	}
 	if val.(*activeCallState) != call2 {
 		t.Fatal("expected active call to still be call2, but it was overwritten or deleted")
+	}
+
+	bridge.Shutdown()
+}
+
+func TestBridgeService_Preemption_RTPAllocationFailure_PreservesOriginalSession(t *testing.T) {
+	sipCaller := &mockSIPCaller{}
+	rtpStreamer := &mockRTPStreamer{}
+	ingress := &mockIngress{}
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
+
+	bridge := NewBridgeService(
+		nil,
+		BridgeConfig{
+			DrainDelayMs:      50,
+			IdleHangupDelayMs: 2000,
+			ConflictPolicy:    domain.ConflictPolicyPreemptHigher,
+		},
+		arbiter,
+		sipCaller,
+		rtpStreamer,
+		ingress,
+		nil,
+	)
+
+	target := "sip:101@192.168.1.50"
+	playerConfigs := []domain.PlayerConfig{
+		{
+			ID:        "player-music",
+			SIPTarget: target,
+			Priority:  10,
+			Codec:     domain.CodecG722,
+		},
+		{
+			ID:        "player-announcement",
+			SIPTarget: target,
+			Priority:  100,
+			Codec:     domain.CodecG722,
+		},
+	}
+	_ = bridge.RegisterPlayers(playerConfigs)
+
+	// 1. Player 1 (music, priority 10) starts streaming
+	bridge.OnStreamStart("player-music", domain.StreamMetadata{Title: "Background Music"})
+	time.Sleep(30 * time.Millisecond)
+
+	// Verify Player 1 has an active call and is held in the arbiter
+	if _, ok := bridge.activeCalls.Load("player-music"); !ok {
+		t.Fatalf("expected player-music to have an active call")
+	}
+	heldSession, held := arbiter.GetActiveSession(target)
+	if !held || heldSession.PlayerID != "player-music" {
+		t.Fatalf("expected arbiter to track player-music session, got %+v", heldSession)
+	}
+
+	// 2. Configure RTP session creation to fail on next attempt
+	rtpStreamer.mu.Lock()
+	rtpStreamer.failNext = true
+	rtpStreamer.mu.Unlock()
+
+	// 3. Player 2 (announcement, priority 100) attempts to preempt Player 1
+	bridge.OnStreamStart("player-announcement", domain.StreamMetadata{Title: "Emergency Alert"})
+	time.Sleep(30 * time.Millisecond)
+
+	// 4. Verify Player 2 failed cleanly without corrupting Player 1's state or arbiter
+	if _, ok := bridge.activeCalls.Load("player-announcement"); ok {
+		t.Errorf("expected player-announcement call to NOT exist due to RTP creation failure")
+	}
+
+	// Player 1 must still be active and tracked in the arbiter
+	if _, ok := bridge.activeCalls.Load("player-music"); !ok {
+		t.Errorf("expected player-music call to remain active after failed preemption attempt")
+	}
+	heldSession, held = arbiter.GetActiveSession(target)
+	if !held || heldSession.PlayerID != "player-music" {
+		t.Errorf("expected arbiter to still track player-music after failed preemption, got %+v (held=%v)", heldSession, held)
 	}
 
 	bridge.Shutdown()

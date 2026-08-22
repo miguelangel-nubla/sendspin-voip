@@ -358,23 +358,6 @@ func (a *AudioPath) flushPcmTailLocked() {
 	a.transcodePackets++
 }
 
-func (a *AudioPath) appendTranscodedFrameLocked(encoded []byte, playAt time.Time, timestampUs int64, outCh int) {
-	consumed := a.chunksPendingCount
-	a.chunksPendingCount = 0
-
-	a.ready = append(a.ready, ReadyFrame{
-		Payload:        encoded,
-		PlayAt:         playAt,
-		TimestampUs:    timestampUs,
-		Passthrough:    false,
-		Codec:          a.codec,
-		SampleRate:     a.codec.SampleRate(),
-		Channels:       outCh,
-		ChunksConsumed: consumed,
-	})
-	a.transcodePackets++
-}
-
 // PopReady retrieves and removes the oldest 20ms ready frame, automatically
 // acknowledging completed raw chunks in the underlying UpstreamPlayer.
 func (a *AudioPath) PopReady() (ReadyFrame, bool) {
