@@ -8,7 +8,10 @@
       "bump-minor-pre-major": false,
       "bump-patch-for-minor-pre-major": false,
       "extra-files": [
-        "sendspin-voip/config.yaml"
+        {
+          "type": "generic",
+          "path": "sendspin-voip/config.yaml"
+        }
       ]
     }
   }
