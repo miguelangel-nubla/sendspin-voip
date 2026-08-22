@@ -407,16 +407,10 @@ func (c *Caller) Dial(ctx context.Context, player domain.PlayerConfig, localRTPP
 	headers := c.buildAutoAnswerHeaders(preset, customHeader)
 	headers = append(headers, sip.NewHeader("Content-Type", "application/sdp"))
 
-	fromUser := c.config.Username
-	displayName := player.Name
-	if displayName == "" {
-		displayName = fromUser
-	}
-
 	fromHdr := sip.FromHeader{
-		DisplayName: displayName,
+		DisplayName: player.Name,
 		Address: sip.Uri{
-			User: fromUser,
+			User: c.config.Username,
 			Host: c.fromDomain,
 		},
 		Params: sip.HeaderParams{sip.HeaderKV{K: "tag", V: sip.GenerateTagN(16)}},

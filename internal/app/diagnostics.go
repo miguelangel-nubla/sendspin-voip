@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
@@ -245,8 +244,7 @@ func buildActiveCallInfo(
 		}
 		if call.rtpStats.PathIngressCodec != "" {
 			ap.IngressCodec = call.rtpStats.PathIngressCodec
-			ap.IngressFormat = fmt.Sprintf("%s %dHz %dch",
-				strings.ToUpper(call.rtpStats.PathIngressCodec), call.rtpStats.PathIngressRate, call.rtpStats.PathIngressChannels)
+			ap.IngressFormat = domain.FormatAudioDescription(call.rtpStats.PathIngressCodec, call.rtpStats.PathIngressRate, call.rtpStats.PathIngressChannels, 16)
 		}
 	case call.answered:
 		ap.Mode = "transcode"
