@@ -3,6 +3,8 @@ package sendspin
 import (
 	"encoding/binary"
 	"testing"
+
+	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
 )
 
 func TestDecodePCM_16Bit(t *testing.T) {
@@ -64,8 +66,8 @@ func TestNormalizeChannels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeChannels(tt.channels, tt.fallback); got != tt.want {
-				t.Errorf("normalizeChannels(%d, %d) = %d, want %d", tt.channels, tt.fallback, got, tt.want)
+			if got := domain.NormalizeChannels(tt.channels, tt.fallback); got != tt.want {
+				t.Errorf("NormalizeChannels(%d, %d) = %d, want %d", tt.channels, tt.fallback, got, tt.want)
 			}
 		})
 	}

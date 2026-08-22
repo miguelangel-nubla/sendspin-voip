@@ -26,19 +26,6 @@ const (
 	maxOpusChannels = 2
 )
 
-// normalizeChannels clamps an announced channel count to a layout the Opus
-// decoder and the RTP egress pipeline can actually handle, falling back to
-// fallback (and finally stereo) when the server announces something invalid.
-func normalizeChannels(channels, fallback int) int {
-	if channels == 1 || channels == 2 {
-		return channels
-	}
-	if fallback == 1 || fallback == 2 {
-		return fallback
-	}
-	return 2
-}
-
 // IngressConfig defines Sendspin ingress adapter settings.
 type IngressConfig struct {
 	Server   string // "auto" for mDNS, or "ws://host:port" or "host:port"
@@ -595,7 +582,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					if currentRate <= 0 {
 						currentRate = primaryRate
 					}
-					currentChannels = normalizeChannels(startMsg.Player.Channels, primaryChannels)
+					currentChannels = domain.NormalizeChannels(startMsg.Player.Channels, primaryChannels)
 					currentBitDepth = startMsg.Player.BitDepth
 					if currentBitDepth <= 0 {
 						currentBitDepth = 16

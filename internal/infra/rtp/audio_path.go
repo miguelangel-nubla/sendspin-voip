@@ -62,17 +62,11 @@ type AudioPath struct {
 
 // NewAudioPath creates a new AudioPath conversion engine wrapping an UpstreamPlayer raw timeline.
 func NewAudioPath(transcoder app.AudioTranscoderPort, upstream *UpstreamPlayer, codec domain.Codec, initialVolume int) *AudioPath {
-	if initialVolume < 0 {
-		initialVolume = 0
-	}
-	if initialVolume > 100 {
-		initialVolume = 100
-	}
 	return &AudioPath{
 		transcoder: transcoder,
 		upstream:   upstream,
 		codec:      codec,
-		volume:     initialVolume,
+		volume:     domain.ClampVolume(initialVolume),
 		ready:      make([]ReadyFrame, 0, 32),
 	}
 }
@@ -112,11 +106,7 @@ func (a *AudioPath) SetVolume(volumePercent int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if volumePercent > 100 {
-		volumePercent = 100
-	} else if volumePercent < 0 {
-		volumePercent = 0
-	}
+	volumePercent = domain.ClampVolume(volumePercent)
 	if a.volume == volumePercent {
 		return
 	}
@@ -160,10 +150,7 @@ func (a *AudioPath) processChunkLocked(chunk domain.AudioChunk) error {
 	if inRate <= 0 {
 		inRate = 48000
 	}
-	inChannels := chunk.Channels
-	if inChannels <= 0 {
-		inChannels = 2
-	}
+	inChannels := domain.NormalizeChannels(chunk.Channels, 2)
 	inBitDepth := chunk.BitDepth
 	if inBitDepth <= 0 {
 		inBitDepth = 16

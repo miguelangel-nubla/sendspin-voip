@@ -59,6 +59,30 @@ type Player struct {
 	CurrentURI string
 }
 
+// ClampVolume restricts a volume percentage to the valid range [0, 100].
+func ClampVolume(v int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
+
+// EffectiveVolume returns 0 if muted, otherwise the current volume percentage.
+func (p *Player) EffectiveVolume() int {
+	if p.IsMuted {
+		return 0
+	}
+	return p.Volume
+}
+
+// SetVolume updates the player's volume clamped to [0, 100].
+func (p *Player) SetVolume(v int) {
+	p.Volume = ClampVolume(v)
+}
+
 // NewPlayer creates a new player instance from configuration.
 func NewPlayer(cfg PlayerConfig) (*Player, error) {
 	if cfg.ID == "" {

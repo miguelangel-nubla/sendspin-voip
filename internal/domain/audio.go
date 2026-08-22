@@ -142,6 +142,52 @@ func (c Codec) RTPClockRate() uint32 {
 	}
 }
 
+// NormalizeChannels clamps an announced channel count to a valid layout (1 or 2),
+// falling back to fallback (and finally stereo) when given an unsupported value.
+func NormalizeChannels(channels, fallback int) int {
+	if channels == 1 || channels == 2 {
+		return channels
+	}
+	if fallback == 1 || fallback == 2 {
+		return fallback
+	}
+	return 2
+}
+
+// FormatAudioDescription returns a human-readable stream description for arbitrary audio formats.
+func FormatAudioDescription(codec string, sampleRate, channels, bitDepth int) string {
+	codec = strings.ToUpper(strings.TrimSpace(codec))
+	if codec == "" {
+		codec = "PCM"
+	}
+	channels = NormalizeChannels(channels, 2)
+	if sampleRate <= 0 {
+		sampleRate = 48000
+	}
+	if codec == "OPUS" {
+		return fmt.Sprintf("OPUS %dHz %dch", sampleRate, channels)
+	}
+	if bitDepth <= 0 {
+		bitDepth = 16
+	}
+	return fmt.Sprintf("%s %dHz %dch %dbit", codec, sampleRate, channels, bitDepth)
+}
+
+// CalculateBitrateKbps estimates audio bitrate in kbps for the given stream parameters.
+func CalculateBitrateKbps(codec string, sampleRate, channels, bitDepth int) int {
+	if strings.EqualFold(codec, "opus") {
+		return 128
+	}
+	if sampleRate <= 0 {
+		sampleRate = 48000
+	}
+	channels = NormalizeChannels(channels, 2)
+	if bitDepth <= 0 {
+		bitDepth = 16
+	}
+	return (sampleRate * channels * bitDepth) / 1000
+}
+
 // AudioChunk represents audio from Sendspin (either raw PCM samples or native Opus data) with timestamp information.
 type AudioChunk struct {
 	Timestamp  int64     // Server timestamp in microseconds

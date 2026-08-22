@@ -34,11 +34,7 @@ func buildStreamDebugInfo(
 	muted := player.IsMuted
 	isPlaying := player.IsPlaying
 	isGrouped := player.IsGrouped
-
-	effectiveVol := vol
-	if muted {
-		effectiveVol = 0
-	}
+	effectiveVol := player.EffectiveVolume()
 
 	prodInfo, prodFormat, bitrateIn, trackProgSec := buildProducerInfo(player, ingStats, hasIngress)
 
@@ -95,47 +91,11 @@ func buildProducerInfo(player *domain.Player, ingStats IngressPlayerStats, hasIn
 		}
 	}
 
-	var trackStr string
-	if ingStats.Metadata.Title != "" {
-		if ingStats.Metadata.Artist != "" {
-			trackStr = fmt.Sprintf("%s - %s", ingStats.Metadata.Artist, ingStats.Metadata.Title)
-		} else {
-			trackStr = ingStats.Metadata.Title
-		}
-	}
-
-	prodFormat := "PCM 48000Hz 2ch 16bit"
-	bitrateIn := 1536
-	if hasIngress && ingStats.Codec != "" {
-		if strings.EqualFold(ingStats.Codec, "opus") {
-			prodFormat = fmt.Sprintf("OPUS %dHz %dch", ingStats.SampleRate, ingStats.Channels)
-			bitrateIn = 128
-		} else {
-			prodFormat = fmt.Sprintf("%s %dHz %dch %dbit", strings.ToUpper(ingStats.Codec), ingStats.SampleRate, ingStats.Channels, ingStats.BitDepth)
-			bitrateIn = (ingStats.SampleRate * ingStats.Channels * ingStats.BitDepth) / 1000
-		}
-	} else {
-		prodFormat = "OPUS 48000Hz 2ch"
-		bitrateIn = 128
-	}
-
-	ingressURL := ingStats.ServerAddr
-	if ingressURL != "" && !strings.HasPrefix(ingressURL, "ws://") && !strings.HasPrefix(ingressURL, "http://") {
-		ingressURL = "ws://" + ingressURL + "/sendspin"
-	}
-
-	var trackProgSec float64
-	if player.IsPlaying {
-		trackProgSec = float64(ingStats.Metadata.ProgressMs) / 1000.0
-		if !ingStats.Metadata.ProgressUpdated.IsZero() {
-			trackProgSec += time.Since(ingStats.Metadata.ProgressUpdated).Seconds()
-			if ingStats.Metadata.Duration > 0 && trackProgSec > ingStats.Metadata.Duration.Seconds() {
-				trackProgSec = ingStats.Metadata.Duration.Seconds()
-			}
-		}
-	} else if prodState == "paused" {
-		trackProgSec = float64(ingStats.Metadata.ProgressMs) / 1000.0
-	}
+	trackStr := ingStats.Metadata.TrackDisplay()
+	prodFormat := ingStats.FormatDescription()
+	bitrateIn := ingStats.BitrateKbps()
+	ingressURL := ingStats.WebSocketURL()
+	trackProgSec := ingStats.Metadata.ElapsedSeconds(player.IsPlaying)
 
 	prod := ProducerDebugInfo{
 		Type:             "Sendspin Ingress",

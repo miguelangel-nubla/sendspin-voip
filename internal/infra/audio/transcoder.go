@@ -54,9 +54,7 @@ func (t *Transcoder) DecodeOpusToPCM(opusData []byte, channels int) ([]int32, er
 	if len(opusData) == 0 {
 		return nil, nil
 	}
-	if channels != 1 && channels != 2 {
-		channels = 2
-	}
+	channels = domain.NormalizeChannels(channels, 2)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -104,9 +102,7 @@ func (t *Transcoder) Transcode(
 		return nil, nil
 	}
 
-	if srcChannels <= 0 {
-		srcChannels = 2
-	}
+	srcChannels = domain.NormalizeChannels(srcChannels, 2)
 	if srcRate <= 0 {
 		srcRate = 48000
 	}
@@ -220,9 +216,7 @@ func clampToInt16(samples []int32) []int16 {
 
 // encodeOpus encodes 48 kHz PCM (mono or stereo interleaved) into an Opus packet.
 func (t *Transcoder) encodeOpus(pcm16 []int16, channels int) ([]byte, error) {
-	if channels != 1 && channels != 2 {
-		channels = 1
-	}
+	channels = domain.NormalizeChannels(channels, 1)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()

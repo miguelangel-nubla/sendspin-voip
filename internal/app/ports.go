@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
@@ -84,6 +85,54 @@ type IngressPlayerStats struct {
 	Metadata       domain.StreamMetadata `json:"metadata"`
 	ChunksReceived uint64                `json:"chunks_received"`
 	BytesReceived  uint64                `json:"bytes_received"`
+}
+
+// FormatDescription returns a formatted representation of the active ingress stream format.
+func (s IngressPlayerStats) FormatDescription() string {
+	codec := s.Codec
+	if codec == "" {
+		codec = "opus"
+	}
+	rate := s.SampleRate
+	if rate <= 0 {
+		rate = 48000
+	}
+	channels := domain.NormalizeChannels(s.Channels, 2)
+	bitDepth := s.BitDepth
+	if bitDepth <= 0 {
+		bitDepth = 16
+	}
+	return domain.FormatAudioDescription(codec, rate, channels, bitDepth)
+}
+
+// BitrateKbps calculates the bitrate in kbps for the ingress format.
+func (s IngressPlayerStats) BitrateKbps() int {
+	codec := s.Codec
+	if codec == "" {
+		codec = "opus"
+	}
+	rate := s.SampleRate
+	if rate <= 0 {
+		rate = 48000
+	}
+	channels := domain.NormalizeChannels(s.Channels, 2)
+	bitDepth := s.BitDepth
+	if bitDepth <= 0 {
+		bitDepth = 16
+	}
+	return domain.CalculateBitrateKbps(codec, rate, channels, bitDepth)
+}
+
+// WebSocketURL returns the normalized WebSocket endpoint URI for the ingress server.
+func (s IngressPlayerStats) WebSocketURL() string {
+	addr := s.ServerAddr
+	if addr == "" {
+		return ""
+	}
+	if !strings.HasPrefix(addr, "ws://") && !strings.HasPrefix(addr, "http://") {
+		addr = "ws://" + addr + "/sendspin"
+	}
+	return addr
 }
 
 // ProducerDebugInfo details the upstream audio ingress source.

@@ -260,9 +260,7 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 			} else {
 				call.cancelLingerLocked()
 				call.session.Metadata = meta
-
-				startProgSec := float64(meta.ProgressMs) / 1000.0
-				call.streamStartProgressSec = startProgSec
+				call.streamStartProgressSec = meta.ElapsedSeconds(true)
 				if call.rtpSession != nil {
 					call.rtpSession.ClearBuffer()
 				}
@@ -334,19 +332,16 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 	s.playersMu.RLock()
 	volume := 100
 	if p, ok := s.players[playerID]; ok {
-		volume = p.Volume
-		if p.IsMuted {
-			volume = 0
-		}
+		volume = p.EffectiveVolume()
 	}
 	s.playersMu.RUnlock()
 
 	rtpSess.SetVolume(volume)
 
-	startProgSec := float64(meta.ProgressMs) / 1000.0
+	startProgSec := meta.ElapsedSeconds(true)
 	if startProgSec <= 0 {
-		if stats, ok := s.ingress.GetPlayerStats(playerID); ok && stats.Metadata.ProgressMs > 0 {
-			startProgSec = float64(stats.Metadata.ProgressMs) / 1000.0
+		if stats, ok := s.ingress.GetPlayerStats(playerID); ok {
+			startProgSec = stats.Metadata.ElapsedSeconds(true)
 		}
 	}
 
@@ -433,8 +428,7 @@ func (s *BridgeService) OnMetadata(playerID string, meta domain.StreamMetadata) 
 		call := val.(*activeCallState)
 		call.mu.Lock()
 		call.session.Metadata = meta
-		startProgSec := float64(meta.ProgressMs) / 1000.0
-		call.streamStartProgressSec = startProgSec
+		call.streamStartProgressSec = meta.ElapsedSeconds(true)
 		call.mu.Unlock()
 		s.logger.Debug("Updated track metadata on active call session",
 			"player_id", playerID,
@@ -494,10 +488,7 @@ func (s *BridgeService) OnAudioChunk(playerID string, chunk domain.AudioChunk) {
 	volume := 100
 	if p, ok := s.players[playerID]; ok {
 		isPlaying = p.IsPlaying
-		volume = p.Volume
-		if p.IsMuted {
-			volume = 0
-		}
+		volume = p.EffectiveVolume()
 	}
 	s.playersMu.RUnlock()
 
@@ -581,17 +572,12 @@ func (s *BridgeService) handleStreamPauseOrStop(playerID string) {
 // is flushed so the new level applies immediately, while the raw Upstream
 // buffer is left intact.
 func (s *BridgeService) OnVolumeChange(playerID string, volume int) {
-	if volume > 100 {
-		volume = 100
-	}
-	if volume < 0 {
-		volume = 0
-	}
+	volume = domain.ClampVolume(volume)
 
 	var isMuted bool
 	s.playersMu.Lock()
 	if p, ok := s.players[playerID]; ok {
-		p.Volume = volume
+		p.SetVolume(volume)
 		isMuted = p.IsMuted
 		s.logger.Debug("Player volume changed", "player_id", playerID, "volume", volume)
 	}
@@ -626,10 +612,7 @@ func (s *BridgeService) flushActiveRTPBuffer(playerID string) {
 	s.playersMu.RLock()
 	volume := 100
 	if p, ok := s.players[playerID]; ok {
-		volume = p.Volume
-		if p.IsMuted {
-			volume = 0
-		}
+		volume = p.EffectiveVolume()
 	}
 	s.playersMu.RUnlock()
 

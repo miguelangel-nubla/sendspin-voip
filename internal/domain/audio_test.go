@@ -67,3 +67,39 @@ func TestNormalizeSIPTarget(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeChannels(t *testing.T) {
+	cases := []struct {
+		channels, fallback, want int
+	}{
+		{1, 2, 1},
+		{2, 1, 2},
+		{0, 1, 1},
+		{0, 2, 2},
+		{6, 0, 2},
+		{6, 1, 1},
+	}
+	for _, tc := range cases {
+		if got := NormalizeChannels(tc.channels, tc.fallback); got != tc.want {
+			t.Errorf("NormalizeChannels(%d, %d) = %d, want %d", tc.channels, tc.fallback, got, tc.want)
+		}
+	}
+}
+
+func TestFormatAudioDescription(t *testing.T) {
+	if got := FormatAudioDescription("opus", 48000, 2, 16); got != "OPUS 48000Hz 2ch" {
+		t.Errorf("FormatAudioDescription(opus) = %q, want %q", got, "OPUS 48000Hz 2ch")
+	}
+	if got := FormatAudioDescription("pcm", 44100, 2, 16); got != "PCM 44100Hz 2ch 16bit" {
+		t.Errorf("FormatAudioDescription(pcm) = %q, want %q", got, "PCM 44100Hz 2ch 16bit")
+	}
+}
+
+func TestCalculateBitrateKbps(t *testing.T) {
+	if got := CalculateBitrateKbps("opus", 48000, 2, 16); got != 128 {
+		t.Errorf("CalculateBitrateKbps(opus) = %d, want 128", got)
+	}
+	if got := CalculateBitrateKbps("pcm", 48000, 2, 16); got != 1536 {
+		t.Errorf("CalculateBitrateKbps(pcm) = %d, want 1536", got)
+	}
+}
