@@ -21,12 +21,9 @@ const (
 
 // BridgeConfig contains global operational parameters for the bridge.
 type BridgeConfig struct {
-	DefaultBufferMode  domain.BufferMode
-	PickupBufferMs     int
-	DrainDelayMs       int
-	IdleHangupDelayMs  int
-	PreAnswerBufferSec int
-	ConflictPolicy     domain.ConflictPolicy
+	DrainDelayMs      int
+	IdleHangupDelayMs int
+	ConflictPolicy    domain.ConflictPolicy
 }
 
 type activeCallState struct {
@@ -114,9 +111,6 @@ func NewBridgeService(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if config.PickupBufferMs <= 0 {
-		config.PickupBufferMs = 2000
-	}
 	if config.DrainDelayMs <= 0 {
 		config.DrainDelayMs = 500
 	}
@@ -124,9 +118,6 @@ func NewBridgeService(
 		config.IdleHangupDelayMs = 0
 	} else if config.IdleHangupDelayMs == 0 {
 		config.IdleHangupDelayMs = 5000
-	}
-	if config.DefaultBufferMode == "" {
-		config.DefaultBufferMode = domain.BufferModeAnnouncement
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -144,6 +135,7 @@ func NewBridgeService(
 		players:     make(map[string]*domain.Player),
 	}
 }
+
 
 // RegisterPlayers registers configured players and starts dynamic downstream discovery.
 func (s *BridgeService) RegisterPlayers(configs []domain.PlayerConfig) error {
@@ -286,11 +278,6 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		}
 	}
 
-	effectiveMode := playerCfg.BufferMode
-	if effectiveMode == "" {
-		effectiveMode = s.config.DefaultBufferMode
-	}
-
 	drainDelay := time.Duration(s.config.DrainDelayMs) * time.Millisecond
 	sessionID := uuid.New().String()
 	session := domain.NewCallSession(
@@ -299,7 +286,6 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		playerCfg.SIPTarget,
 		playerCfg.Priority,
 		meta,
-		effectiveMode,
 		drainDelay,
 	)
 
@@ -308,7 +294,6 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		"target", playerCfg.SIPTarget,
 		"title", meta.Title,
 		"artist", meta.Artist,
-		"buffer_mode", effectiveMode,
 		"priority", playerCfg.Priority,
 	)
 
@@ -335,7 +320,7 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 		s.terminatePlayerCallSync(preempted.PlayerID, false, 500*time.Millisecond)
 	}
 
-	// 3. Allocate local RTP socket with 3-stage pipeline
+	// 3. Allocate local RTP socket
 	rtpSess, err := s.rtpStreamer.CreateSession(playerCfg.Codec)
 	if err != nil {
 		s.logger.Error("Failed to create RTP session", "err", err)
@@ -353,7 +338,6 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 	}
 	s.playersMu.RUnlock()
 
-	rtpSess.SetBufferMode(effectiveMode)
 	rtpSess.SetVolume(volume)
 
 	startProgSec := float64(meta.ProgressMs) / 1000.0
@@ -413,8 +397,6 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 		activeCodec = negotiated
 	}
 
-	call.rtpSession.SetBufferMode(session.EffectiveMod)
-
 	if err := call.rtpSession.StartTransmission(remoteRTP); err != nil {
 		s.logger.Error("Failed to start RTP transmission", "player_id", cfg.ID, "err", err)
 		s.terminatePlayerCall(cfg.ID, true)
@@ -446,23 +428,13 @@ func (s *BridgeService) dialAndRunCall(cfg domain.PlayerConfig, call *activeCall
 func (s *BridgeService) OnStreamClear(playerID string) {
 	if val, ok := s.activeCalls.Load(playerID); ok {
 		call := val.(*activeCallState)
-		call.mu.Lock()
-		var dialDelay time.Duration
-		if !call.session.StartTime.IsZero() && !call.session.AnswerTime.IsZero() {
-			dialDelay = call.session.AnswerTime.Sub(call.session.StartTime)
-		}
-		bufferMode := call.session.EffectiveMod
-		call.mu.Unlock()
-
 		if call.rtpSession != nil {
 			call.rtpSession.ClearBuffer()
-			if bufferMode == domain.BufferModeAnnouncement && dialDelay > 0 {
-				call.rtpSession.InjectSilence(dialDelay)
-			}
 		}
 		s.logger.Debug("Flushed audio pipeline buffers on stream clear", "player_id", playerID)
 	}
 }
+
 
 // OnPlaybackState handles playback state changes from Music Assistant (playing, paused, stopped).
 func (s *BridgeService) OnPlaybackState(playerID string, state string) {
@@ -780,7 +752,6 @@ func (s *BridgeService) GetStreamDebugInfo(id string) (StreamDebugInfo, bool) {
 		call.mu.Lock()
 		callSnap.hasCall = true
 		callSnap.sessionState = string(call.session.GetState())
-		callSnap.effectiveBufferMode = string(call.session.EffectiveMod)
 		callSnap.priority = call.session.Priority
 		callSnap.lingerActive = (call.lingerTimer != nil)
 		callSnap.answered = call.answered
@@ -797,7 +768,8 @@ func (s *BridgeService) GetStreamDebugInfo(id string) (StreamDebugInfo, bool) {
 		}
 	}
 
-	info := buildStreamDebugInfo(player, s.config.DefaultBufferMode, ingStats, hasIngress, discoveredCodecs, callSnap)
+	info := buildStreamDebugInfo(player, ingStats, hasIngress, discoveredCodecs, callSnap)
 	return info, true
 }
+
 

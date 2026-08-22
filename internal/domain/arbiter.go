@@ -10,28 +10,23 @@ import (
 type ConflictPolicy string
 
 const (
-	ConflictPolicyPreemptAnnouncements ConflictPolicy = "preempt_for_announcements" // Preempt active music for incoming announcements
+	ConflictPolicyPreemptHigher        ConflictPolicy = "preempt_higher"            // Preempt active music if new priority > current
+	ConflictPolicyPreemptAnnouncements ConflictPolicy = "preempt_for_announcements" // Backward-compatibility alias for preempt_higher
 	ConflictPolicyPreemptAlways        ConflictPolicy = "preempt_always"            // Always preempt if new priority >= current
 	ConflictPolicyBusy                 ConflictPolicy = "busy"                      // Reject new playback if target is busy
 )
 
 // ParseConflictPolicy normalizes and validates a target conflict policy.
-// An empty value selects the default (preempt_for_announcements).
-//
-// Validating this matters: an unrecognised policy matches no case in
-// RequestTarget's switch, so shouldPreempt stays false and the arbiter rejects
-// every call to a busy target. A typo in the config silently breaks playback
-// rather than failing at startup.
 func ParseConflictPolicy(s string) (ConflictPolicy, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", "preempt_for_announcements":
-		return ConflictPolicyPreemptAnnouncements, nil
+	case "", "preempt_higher", "preempt_for_announcements", "priority":
+		return ConflictPolicyPreemptHigher, nil
 	case "preempt_always":
 		return ConflictPolicyPreemptAlways, nil
 	case "busy":
 		return ConflictPolicyBusy, nil
 	default:
-		return "", fmt.Errorf("invalid target_conflict_policy %q (allowed: preempt_for_announcements, preempt_always, busy)", s)
+		return "", fmt.Errorf("invalid target_conflict_policy %q (allowed: preempt_higher, preempt_always, busy)", s)
 	}
 }
 
@@ -45,7 +40,7 @@ type TargetArbiter struct {
 // NewTargetArbiter creates a new target arbiter.
 func NewTargetArbiter(policy ConflictPolicy) *TargetArbiter {
 	if policy == "" {
-		policy = ConflictPolicyPreemptAnnouncements
+		policy = ConflictPolicyPreemptHigher
 	}
 	return &TargetArbiter{
 		policy:         policy,
@@ -76,10 +71,8 @@ func (a *TargetArbiter) RequestTarget(newSession *CallSession) (*CallSession, er
 		if newSession.Priority >= current.Priority {
 			shouldPreempt = true
 		}
-	case ConflictPolicyPreemptAnnouncements:
-		// Preempt if the new stream is configured in announcement mode and current is not, OR if new priority is strictly higher
-		if (newSession.EffectiveMod == BufferModeAnnouncement && current.EffectiveMod != BufferModeAnnouncement) ||
-			(newSession.Priority > current.Priority) {
+	case ConflictPolicyPreemptHigher, ConflictPolicyPreemptAnnouncements:
+		if newSession.Priority > current.Priority {
 			shouldPreempt = true
 		}
 	case ConflictPolicyBusy:
@@ -91,6 +84,7 @@ func (a *TargetArbiter) RequestTarget(newSession *CallSession) (*CallSession, er
 		a.activeSessions[target] = newSession
 		return current, nil
 	}
+
 
 	return nil, fmt.Errorf("target %s is busy with active session from player %s (policy: %s)",
 		target, current.PlayerID, a.policy)

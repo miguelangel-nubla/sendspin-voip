@@ -19,19 +19,18 @@ const (
 
 // CallSession represents an active SIP dialog and RTP stream for a physical SIP phone target.
 type CallSession struct {
-	mu           sync.RWMutex
-	ID           string
-	PlayerID     string
-	SIPTarget    string
-	Priority     int
-	State        SessionState
-	Metadata     StreamMetadata
-	StartTime    time.Time
-	AnswerTime   time.Time
-	CancelFunc   context.CancelFunc
-	Ctx          context.Context
-	DrainDelay   time.Duration
-	EffectiveMod BufferMode
+	mu         sync.RWMutex
+	ID         string
+	PlayerID   string
+	SIPTarget  string
+	Priority   int
+	State      SessionState
+	Metadata   StreamMetadata
+	StartTime  time.Time
+	AnswerTime time.Time
+	CancelFunc context.CancelFunc
+	Ctx        context.Context
+	DrainDelay time.Duration
 }
 
 // NewCallSession creates a new call session.
@@ -41,24 +40,23 @@ func NewCallSession(
 	sipTarget string,
 	priority int,
 	meta StreamMetadata,
-	mode BufferMode,
 	drainDelay time.Duration,
 ) *CallSession {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &CallSession{
-		ID:           id,
-		PlayerID:     playerID,
-		SIPTarget:    NormalizeSIPTarget(sipTarget),
-		Priority:     priority,
-		State:        StateIdle,
-		Metadata:     meta,
-		StartTime:    time.Now(),
-		CancelFunc:   cancel,
-		Ctx:          ctx,
-		DrainDelay:   drainDelay,
-		EffectiveMod: mode,
+		ID:         id,
+		PlayerID:   playerID,
+		SIPTarget:  NormalizeSIPTarget(sipTarget),
+		Priority:   priority,
+		State:      StateIdle,
+		Metadata:   meta,
+		StartTime:  time.Now(),
+		CancelFunc: cancel,
+		Ctx:        ctx,
+		DrainDelay: drainDelay,
 	}
 }
+
 
 // SetState updates the session state thread-safely.
 func (s *CallSession) SetState(state SessionState) {

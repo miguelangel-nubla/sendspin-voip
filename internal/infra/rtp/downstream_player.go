@@ -9,21 +9,16 @@ import (
 )
 
 // DownstreamPlayer represents Layer 3 of the audio pipeline.
-// It is the playout timing policy engine that reads converted 20ms ready frames
-// from AudioPath and decides when to hand them to RTPTransport.
+// It is the live playout timing policy engine that reads converted 20ms ready frames
+// from AudioPath and paces transmission to RTPTransport.
 //
-// In LIVE mode:
+// Playout policy:
 //   - Discards stale raw upstream chunks before conversion so CPU is not wasted transcoding stale audio.
-//   - Paces packet transmission against Sendspin PlayAt timestamps.
-//   - Instantly discards expired ready frames before (Now - 150ms) with zero trickle latency.
-//
-// In ANNOUNCEMENT mode:
-//   - Holds all frames from sample 0 until the SIP call is answered.
-//   - Once answered, plays continuously from sample 0 on a strict 20ms cadence.
+//   - Paces packet transmission against Sendspin PlayAt timestamps for real-time synchronization.
+//   - Discards expired ready frames before (Now - 150ms) to ensure zero trickle latency.
 type DownstreamPlayer struct {
 	mu          sync.Mutex
 	logger      *slog.Logger
-	mode        domain.BufferMode
 	answered    bool
 	codec       domain.Codec
 	audioPath   *AudioPath
@@ -39,7 +34,6 @@ type DownstreamPlayer struct {
 // NewDownstreamPlayer creates a new DownstreamPlayer.
 func NewDownstreamPlayer(
 	logger *slog.Logger,
-	mode domain.BufferMode,
 	codec domain.Codec,
 	audioPath *AudioPath,
 	transport *RTPTransport,
@@ -49,20 +43,12 @@ func NewDownstreamPlayer(
 	}
 	return &DownstreamPlayer{
 		logger:    logger,
-		mode:      mode,
 		codec:     codec,
 		audioPath: audioPath,
 		transport: transport,
 		firstPkt:  true,
 		stopChan:  make(chan struct{}),
 	}
-}
-
-// SetBufferMode updates the playout policy (Live vs Announcement).
-func (d *DownstreamPlayer) SetBufferMode(mode domain.BufferMode) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.mode = mode
 }
 
 // SetCodec updates the downstream transmission codec.
@@ -120,7 +106,6 @@ func (d *DownstreamPlayer) pacingLoop() {
 func (d *DownstreamPlayer) step() {
 	d.mu.Lock()
 	answered := d.answered
-	mode := d.mode
 	codec := d.codec
 	isMarker := d.firstPkt
 	d.mu.Unlock()
@@ -131,26 +116,22 @@ func (d *DownstreamPlayer) step() {
 
 	now := time.Now()
 
-	// 1. In live mode, discard stale raw upstream audio and stale ready frames before conversion.
-	if mode == domain.BufferModeLive {
-		staleCutoff := now.Add(-150 * time.Millisecond)
-		d.audioPath.DiscardBefore(staleCutoff)
-	}
+	// 1. Discard stale raw upstream audio and stale ready frames before conversion.
+	staleCutoff := now.Add(-150 * time.Millisecond)
+	d.audioPath.DiscardBefore(staleCutoff)
 
 	// 2. Convert raw upstream chunks into ready 20ms frames (up to 35 frames / 700ms ahead)
 	_ = d.audioPath.Fill(35)
 
-	// 3. In live mode, verify scheduled playback time
-	if mode == domain.BufferModeLive {
-		readyFrame, ok := d.audioPath.PeekReady()
-		if !ok {
-			return
-		}
+	// 3. Verify scheduled playback time
+	readyFrame, ok := d.audioPath.PeekReady()
+	if !ok {
+		return
+	}
 
-		// Hold until scheduled playback time (closes gap with Music Assistant clock)
-		if !readyFrame.PlayAt.IsZero() && now.Before(readyFrame.PlayAt) {
-			return
-		}
+	// Hold until scheduled playback time (locks into Sendspin clock synchronization)
+	if !readyFrame.PlayAt.IsZero() && now.Before(readyFrame.PlayAt) {
+		return
 	}
 
 	// 4. Pop the ready 20ms frame (AudioPath automatically acknowledges consumed upstream chunks)

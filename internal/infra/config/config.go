@@ -71,12 +71,9 @@ type SendspinConfig struct {
 
 // BridgeConfig defines bridge runtime parameters.
 type BridgeConfig struct {
-	DefaultBufferMode  domain.BufferMode     `yaml:"default_buffer_mode" json:"default_buffer_mode"`
-	PickupBufferMs     int                   `yaml:"pickup_buffer_ms" json:"pickup_buffer_ms"`
-	DrainDelayMs       int                   `yaml:"drain_delay_ms" json:"drain_delay_ms"`
-	IdleHangupDelayMs  int                   `yaml:"idle_hangup_delay_ms" json:"idle_hangup_delay_ms"`
-	PreAnswerBufferSec int                   `yaml:"pre_answer_buffer_sec" json:"pre_answer_buffer_sec"`
-	ConflictPolicy     domain.ConflictPolicy `yaml:"target_conflict_policy" json:"target_conflict_policy"`
+	DrainDelayMs      int                   `yaml:"drain_delay_ms" json:"drain_delay_ms"`
+	IdleHangupDelayMs int                   `yaml:"idle_hangup_delay_ms" json:"idle_hangup_delay_ms"`
+	ConflictPolicy    domain.ConflictPolicy `yaml:"target_conflict_policy" json:"target_conflict_policy"`
 }
 
 // PlayerConfig represents player definition in YAML/JSON.
@@ -85,12 +82,10 @@ type PlayerConfig struct {
 	Name                   string                  `yaml:"name" json:"name"`
 	SIPTarget              string                  `yaml:"sip_target" json:"sip_target"`
 	Codec                  string                  `yaml:"codec" json:"codec"`
-	BufferMode             string                  `yaml:"buffer_mode" json:"buffer_mode"`
 	AutoAnswer             domain.AutoAnswerPreset `yaml:"auto_answer" json:"auto_answer"`
 	CustomAutoAnswerHeader string                  `yaml:"custom_auto_answer_header" json:"custom_auto_answer_header"`
 	Priority               int                     `yaml:"priority" json:"priority"`
 	DefaultVolume          int                     `yaml:"default_volume" json:"default_volume"`
-	PreAnswerBufferSec     int                     `yaml:"pre_answer_buffer_sec" json:"pre_answer_buffer_sec"`
 }
 
 // Load loads configuration from YAML file path, Home Assistant /data/options.json, or environment variables.
@@ -166,12 +161,9 @@ func DefaultConfig() *AppConfig {
 			BufferMs: 500,
 		},
 		Bridge: BridgeConfig{
-			DefaultBufferMode:  domain.BufferModeAnnouncement,
-			PickupBufferMs:     2000,
-			DrainDelayMs:       500,
-			IdleHangupDelayMs:  5000,
-			PreAnswerBufferSec: 120,
-			ConflictPolicy:     domain.ConflictPolicyPreemptAnnouncements,
+			DrainDelayMs:      500,
+			IdleHangupDelayMs: 5000,
+			ConflictPolicy:    domain.ConflictPolicyPreemptHigher,
 		},
 		Players: []PlayerConfig{},
 	}
@@ -218,13 +210,6 @@ func applyEnvOverrides(cfg *AppConfig) {
 	if v := os.Getenv("SENDSPIN_SERVER"); v != "" {
 		cfg.Sendspin.Server = v
 	}
-	if v := os.Getenv("DEFAULT_BUFFER_MODE"); v != "" {
-		// Left unparsed, a typo here produces a BufferMode that is neither
-		// "announcement" nor "live". The bridge then treats every pre-answer
-		// chunk as non-announcement and discards it, so announcements lose their
-		// opening. Validate() reports the bad value instead.
-		cfg.Bridge.DefaultBufferMode = domain.BufferMode(strings.ToLower(strings.TrimSpace(v)))
-	}
 	if v := os.Getenv("TARGET_CONFLICT_POLICY"); v != "" {
 		cfg.Bridge.ConflictPolicy = domain.ConflictPolicy(strings.ToLower(strings.TrimSpace(v)))
 	}
@@ -241,29 +226,14 @@ func applyEnvOverrides(cfg *AppConfig) {
 	if v := os.Getenv("SIP_TRANSPORT"); v != "" {
 		cfg.SIP.Transport = v
 	}
-	if v := os.Getenv("PICKUP_BUFFER_MS"); v != "" {
-		if val, err := strconv.Atoi(v); err == nil {
-			cfg.Bridge.PickupBufferMs = val
-		}
-	}
 	if v := os.Getenv("IDLE_HANGUP_DELAY_MS"); v != "" {
 		if val, err := strconv.Atoi(v); err == nil {
 			cfg.Bridge.IdleHangupDelayMs = val
 		}
 	}
-	if v := os.Getenv("PRE_ANSWER_BUFFER_SEC"); v != "" {
-		if val, err := strconv.Atoi(v); err == nil {
-			cfg.Bridge.PreAnswerBufferSec = val
-		}
-	}
 }
 
 // Validate checks configuration sanity and normalizes enum-valued fields.
-//
-// Every enum below is consumed by a switch that silently does nothing on an
-// unrecognised value, so a typo used to produce a service that starts happily
-// and then misbehaves (no preemption, no auto-answer header, announcements
-// clipped). Failing at startup with the allowed values is far kinder.
 func (c *AppConfig) Validate() error {
 	if c.StateFile == "" {
 		c.StateFile = DefaultStateFilePath()
@@ -295,12 +265,6 @@ func (c *AppConfig) Validate() error {
 		return fmt.Errorf("sip.auto_answer_preset: %w", err)
 	}
 	c.SIP.AutoAnswerPreset = preset
-
-	mode, err := domain.ParseBufferMode(string(c.Bridge.DefaultBufferMode))
-	if err != nil {
-		return fmt.Errorf("bridge.default_buffer_mode: %w", err)
-	}
-	c.Bridge.DefaultBufferMode = mode
 
 	policy, err := domain.ParseConflictPolicy(string(c.Bridge.ConflictPolicy))
 	if err != nil {
@@ -340,11 +304,6 @@ func (c *AppConfig) ToDomainPlayerConfigs() ([]domain.PlayerConfig, error) {
 			return nil, fmt.Errorf("player %s: %w", p.ID, err)
 		}
 
-		bMode, err := domain.ParseBufferMode(p.BufferMode)
-		if err != nil {
-			return nil, fmt.Errorf("player %s: %w", p.ID, err)
-		}
-
 		autoAnswer := c.SIP.AutoAnswerPreset
 		if p.AutoAnswer != "" {
 			autoAnswer, err = domain.ParseAutoAnswerPreset(string(p.AutoAnswer))
@@ -367,25 +326,16 @@ func (c *AppConfig) ToDomainPlayerConfigs() ([]domain.PlayerConfig, error) {
 		}
 
 		customHeader := p.CustomAutoAnswerHeader
-		bufSec := p.PreAnswerBufferSec
-		if bufSec <= 0 {
-			bufSec = c.Bridge.PreAnswerBufferSec
-		}
-		if bufSec <= 0 {
-			bufSec = 120
-		}
 
 		result[i] = domain.PlayerConfig{
 			ID:                     p.ID,
 			Name:                   name,
 			SIPTarget:              p.SIPTarget,
 			Codec:                  codec,
-			BufferMode:             bMode,
 			AutoAnswer:             autoAnswer,
 			CustomAutoAnswerHeader: customHeader,
 			Priority:               p.Priority,
 			DefaultVolume:          vol,
-			PreAnswerBufferSec:     bufSec,
 		}
 	}
 	return result, nil
@@ -394,12 +344,9 @@ func (c *AppConfig) ToDomainPlayerConfigs() ([]domain.PlayerConfig, error) {
 // ToBridgeConfig converts to app.BridgeConfig.
 func (c *AppConfig) ToBridgeConfig() app.BridgeConfig {
 	return app.BridgeConfig{
-		DefaultBufferMode:  c.Bridge.DefaultBufferMode,
-		PickupBufferMs:     c.Bridge.PickupBufferMs,
-		DrainDelayMs:       c.Bridge.DrainDelayMs,
-		IdleHangupDelayMs:  c.Bridge.IdleHangupDelayMs,
-		PreAnswerBufferSec: c.Bridge.PreAnswerBufferSec,
-		ConflictPolicy:     c.Bridge.ConflictPolicy,
+		DrainDelayMs:      c.Bridge.DrainDelayMs,
+		IdleHangupDelayMs: c.Bridge.IdleHangupDelayMs,
+		ConflictPolicy:    c.Bridge.ConflictPolicy,
 	}
 }
 

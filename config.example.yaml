@@ -38,31 +38,27 @@ sendspin:
 
 # Bridge Runtime Tuning
 bridge:
-  default_buffer_mode: announcement # announcement, live
-  pickup_buffer_ms: 2000 # Max audio buffered during SIP call handshake
   drain_delay_ms: 500 # Trailing silence before BYE (prevents cutting end of TTS)
   idle_hangup_delay_ms: 5000 # Linger delay before hanging up idle call (enables seamless seek, pause, and track change)
-  target_conflict_policy: preempt_for_announcements # preempt_for_announcements, preempt_always, busy
+  target_conflict_policy: preempt_higher # preempt_higher, preempt_always, busy
 
 # Virtual Player mappings to SIP targets
-# The same SIP target can be mapped to multiple players with different behaviors!
+# The same SIP target can be mapped to multiple players with different priorities and behaviors!
 players:
-  # Player 1: Desk Phone Profile for High-Priority Announcements (Auto discovers best codec, zero speech clipping)
+  # Player 1: Desk Phone Profile for High-Priority Announcements
   - id: "office_phone_announcement"
     name: "Office Phone (Announcements)"
     sip_target: "sip:101@192.168.1.50"
     codec: auto # auto (discovers best: opus > g722 > pcmu > pcma), or lock to specific codec
-    buffer_mode: announcement # Plays from sample 0 once answered
     auto_answer: intercom # Force auto-answer on speakerphone
     priority: 10 # High priority: preempts background music on Ext 101
     default_volume: 100
 
-  # Player 2: Desk Phone Profile for Background Music (Live sync)
+  # Player 2: Desk Phone Profile for Background Music
   - id: "office_phone_music"
     name: "Office Phone (Music)"
     sip_target: "sip:101@192.168.1.50"
     codec: auto
-    buffer_mode: live # Locks to live clock sync with other multi-room speakers
     auto_answer: intercom
     priority: 1
     default_volume: 60
@@ -72,7 +68,6 @@ players:
     name: "Office Phone (Doorbell Ring)"
     sip_target: "sip:101@192.168.1.50"
     codec: pcmu
-    buffer_mode: announcement
     auto_answer: none # Do not auto-answer; phone will ring
     priority: 5
     default_volume: 90
@@ -82,7 +77,6 @@ players:
     name: "Warehouse Paging Horn"
     sip_target: "sip:192.168.1.180:5060" # Direct P2P dialing
     codec: pcmu
-    buffer_mode: announcement
     auto_answer: grandstream
     priority: 10
     default_volume: 100

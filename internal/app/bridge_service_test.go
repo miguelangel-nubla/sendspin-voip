@@ -115,17 +115,15 @@ func (m *mockRTPSession) StartTransmission(remoteAddr *net.UDPAddr) error {
 	m.startedAddr = remoteAddr
 	return nil
 }
-func (m *mockRTPSession) SetCodec(codec domain.Codec)          {}
-func (m *mockRTPSession) SetBufferMode(mode domain.BufferMode) {}
-func (m *mockRTPSession) SetAnswered(answered bool)            {}
-func (m *mockRTPSession) SetVolume(volumePercent int)          {}
+func (m *mockRTPSession) SetCodec(codec domain.Codec) {}
+func (m *mockRTPSession) SetAnswered(answered bool)   {}
+func (m *mockRTPSession) SetVolume(volumePercent int) {}
 func (m *mockRTPSession) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.chunksPushed++
 	return nil
 }
-func (m *mockRTPSession) InjectSilence(duration time.Duration) {}
 func (m *mockRTPSession) ClearBuffer() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -200,15 +198,13 @@ func TestBridgeService_LifecycleAndPlayback(t *testing.T) {
 	sipCaller := &mockSIPCaller{}
 	rtpStreamer := &mockRTPStreamer{}
 	ingress := &mockIngress{}
-	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
 
 	bridge := NewBridgeService(
 		nil,
 		BridgeConfig{
-			DefaultBufferMode: domain.BufferModeAnnouncement,
-			PickupBufferMs:    500,
-			DrainDelayMs:      50,
-			ConflictPolicy:    domain.ConflictPolicyPreemptAnnouncements,
+			DrainDelayMs:   50,
+			ConflictPolicy: domain.ConflictPolicyPreemptHigher,
 		},
 		arbiter,
 		sipCaller,
@@ -224,7 +220,6 @@ func TestBridgeService_LifecycleAndPlayback(t *testing.T) {
 			Name:          "Desk Phone",
 			SIPTarget:     "sip:101@192.168.1.50",
 			Codec:         domain.CodecG722,
-			BufferMode:    domain.BufferModeAnnouncement,
 			Priority:      10,
 			DefaultVolume: 100,
 		},
@@ -289,15 +284,13 @@ func TestBridgeService_Preemption(t *testing.T) {
 	sipCaller := &mockSIPCaller{}
 	rtpStreamer := &mockRTPStreamer{}
 	ingress := &mockIngress{}
-	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
 
 	bridge := NewBridgeService(
 		nil,
 		BridgeConfig{
-			DefaultBufferMode: domain.BufferModeAnnouncement,
-			PickupBufferMs:    500,
-			DrainDelayMs:      50,
-			ConflictPolicy:    domain.ConflictPolicyPreemptAnnouncements,
+			DrainDelayMs:   50,
+			ConflictPolicy: domain.ConflictPolicyPreemptHigher,
 		},
 		arbiter,
 		sipCaller,
@@ -308,20 +301,18 @@ func TestBridgeService_Preemption(t *testing.T) {
 
 	playerConfigs := []domain.PlayerConfig{
 		{
-			ID:         "player-music",
-			Name:       "Desk Music",
-			SIPTarget:  "sip:101@192.168.1.50",
-			Codec:      domain.CodecG722,
-			BufferMode: domain.BufferModeLive,
-			Priority:   1,
+			ID:        "player-music",
+			Name:      "Desk Music",
+			SIPTarget: "sip:101@192.168.1.50",
+			Codec:     domain.CodecG722,
+			Priority:  1,
 		},
 		{
-			ID:         "player-alert",
-			Name:       "Desk Alert",
-			SIPTarget:  "sip:101@192.168.1.50",
-			Codec:      domain.CodecG722,
-			BufferMode: domain.BufferModeAnnouncement,
-			Priority:   10,
+			ID:        "player-alert",
+			Name:      "Desk Alert",
+			SIPTarget: "sip:101@192.168.1.50",
+			Codec:     domain.CodecG722,
+			Priority:  10,
 		},
 	}
 	_ = bridge.RegisterPlayers(playerConfigs)
@@ -349,14 +340,12 @@ func TestBridgeService_RemoteHangup(t *testing.T) {
 	sipCaller := &mockSIPCaller{}
 	rtpStreamer := &mockRTPStreamer{}
 	ingress := &mockIngress{}
-	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
 
 	bridge := NewBridgeService(
 		nil,
 		BridgeConfig{
-			DefaultBufferMode: domain.BufferModeAnnouncement,
-			PickupBufferMs:    500,
-			DrainDelayMs:      50,
+			DrainDelayMs: 50,
 		},
 		arbiter,
 		sipCaller,
@@ -400,13 +389,11 @@ func TestBridgeService_SeekAndTrackChange_ReusesCall(t *testing.T) {
 	sipCaller := &mockSIPCaller{}
 	rtpStreamer := &mockRTPStreamer{}
 	ingress := &mockIngress{}
-	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
 
 	bridge := NewBridgeService(
 		nil,
 		BridgeConfig{
-			DefaultBufferMode: domain.BufferModeLive,
-			PickupBufferMs:    500,
 			DrainDelayMs:      50,
 			IdleHangupDelayMs: 2000,
 		},
@@ -419,10 +406,9 @@ func TestBridgeService_SeekAndTrackChange_ReusesCall(t *testing.T) {
 
 	playerConfigs := []domain.PlayerConfig{
 		{
-			ID:         "player-music",
-			SIPTarget:  "sip:101@192.168.1.50",
-			Codec:      domain.CodecG722,
-			BufferMode: domain.BufferModeLive,
+			ID:        "player-music",
+			SIPTarget: "sip:101@192.168.1.50",
+			Codec:     domain.CodecG722,
 		},
 	}
 	_ = bridge.RegisterPlayers(playerConfigs)
@@ -447,7 +433,6 @@ func TestBridgeService_SeekAndTrackChange_ReusesCall(t *testing.T) {
 	bridge.OnAudioChunk("player-music", chunk)
 
 	// 2. User performs seek in Music Assistant
-	// MA sends StreamClear, StreamEnd, then StreamStart for the new position
 	bridge.OnStreamClear("player-music")
 	bridge.OnStreamEnd("player-music")
 	time.Sleep(20 * time.Millisecond)
@@ -485,13 +470,11 @@ func TestBridgeService_IdleHangupDelay_Expires(t *testing.T) {
 	sipCaller := &mockSIPCaller{}
 	rtpStreamer := &mockRTPStreamer{}
 	ingress := &mockIngress{}
-	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
 
 	bridge := NewBridgeService(
 		nil,
 		BridgeConfig{
-			DefaultBufferMode: domain.BufferModeLive,
-			PickupBufferMs:    500,
 			DrainDelayMs:      20,
 			IdleHangupDelayMs: 60, // 60ms linger
 		},
@@ -504,10 +487,9 @@ func TestBridgeService_IdleHangupDelay_Expires(t *testing.T) {
 
 	playerConfigs := []domain.PlayerConfig{
 		{
-			ID:         "player-music",
-			SIPTarget:  "sip:101@192.168.1.50",
-			Codec:      domain.CodecG722,
-			BufferMode: domain.BufferModeLive,
+			ID:        "player-music",
+			SIPTarget: "sip:101@192.168.1.50",
+			Codec:     domain.CodecG722,
 		},
 	}
 	_ = bridge.RegisterPlayers(playerConfigs)
@@ -537,13 +519,11 @@ func TestBridgeService_TrackChange_StateStopped_ReusesCall(t *testing.T) {
 	sipCaller := &mockSIPCaller{}
 	rtpStreamer := &mockRTPStreamer{}
 	ingress := &mockIngress{}
-	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
 
 	bridge := NewBridgeService(
 		nil,
 		BridgeConfig{
-			DefaultBufferMode: domain.BufferModeLive,
-			PickupBufferMs:    500,
 			DrainDelayMs:      50,
 			IdleHangupDelayMs: 2000,
 		},
@@ -556,10 +536,9 @@ func TestBridgeService_TrackChange_StateStopped_ReusesCall(t *testing.T) {
 
 	playerConfigs := []domain.PlayerConfig{
 		{
-			ID:         "player-music",
-			SIPTarget:  "sip:101@192.168.1.50",
-			Codec:      domain.CodecG722,
-			BufferMode: domain.BufferModeLive,
+			ID:        "player-music",
+			SIPTarget: "sip:101@192.168.1.50",
+			Codec:     domain.CodecG722,
 		},
 	}
 	_ = bridge.RegisterPlayers(playerConfigs)
@@ -597,13 +576,11 @@ func TestBridgeService_GetStreamsDebugInfo(t *testing.T) {
 	sipCaller := &mockSIPCaller{}
 	rtpStreamer := &mockRTPStreamer{}
 	ingress := &mockIngress{}
-	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
 
 	bridge := NewBridgeService(
 		nil,
 		BridgeConfig{
-			DefaultBufferMode: domain.BufferModeAnnouncement,
-			PickupBufferMs:    500,
 			DrainDelayMs:      50,
 			IdleHangupDelayMs: 2000,
 		},
@@ -620,7 +597,6 @@ func TestBridgeService_GetStreamsDebugInfo(t *testing.T) {
 			Name:          "Test Desk Phone",
 			SIPTarget:     "sip:8003@asterisk.local",
 			Codec:         domain.CodecG722,
-			BufferMode:    domain.BufferModeLive,
 			Priority:      10,
 			DefaultVolume: 100,
 		},
@@ -683,7 +659,7 @@ func TestBridgeService_StateStorePersistence(t *testing.T) {
 	sipCaller := &mockSIPCaller{}
 	rtpStreamer := &mockRTPStreamer{}
 	ingress := &mockIngress{}
-	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
 	store := &mockStateStore{
 		states: map[string]PlayerStateRecord{
 			"player-desk": {Volume: 58, Muted: true},
@@ -693,9 +669,7 @@ func TestBridgeService_StateStorePersistence(t *testing.T) {
 	bridge := NewBridgeService(
 		nil,
 		BridgeConfig{
-			DefaultBufferMode: domain.BufferModeAnnouncement,
-			PickupBufferMs:    500,
-			DrainDelayMs:      50,
+			DrainDelayMs: 50,
 		},
 		arbiter,
 		sipCaller,
@@ -739,32 +713,25 @@ func TestBridgeService_StateStorePersistence(t *testing.T) {
 	bridge.Shutdown()
 }
 
-// TestBridgeService_ShutdownSendsByeSynchronously pins the contract that
-// Shutdown does not return until every active call has been hung up. main()
-// exits the process the moment Shutdown returns, so a BYE deferred to a
-// goroutine (as terminatePlayerCall does) would never reach the phone and the
-// handset would stay off-hook streaming silence.
 func TestBridgeService_ShutdownSendsByeSynchronously(t *testing.T) {
 	sipCaller := &mockSIPCaller{}
 	rtpStreamer := &mockRTPStreamer{}
 	ingress := &mockIngress{}
-	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements)
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
 
 	bridge := NewBridgeService(
 		nil,
 		BridgeConfig{
-			DefaultBufferMode: domain.BufferModeAnnouncement,
-			PickupBufferMs:    500,
 			DrainDelayMs:      50,
 			IdleHangupDelayMs: 60000,
-			ConflictPolicy:    domain.ConflictPolicyPreemptAnnouncements,
+			ConflictPolicy:    domain.ConflictPolicyPreemptHigher,
 		},
 		arbiter, sipCaller, rtpStreamer, ingress, nil,
 	)
 
 	if err := bridge.RegisterPlayers([]domain.PlayerConfig{{
 		ID: "player-desk", Name: "Desk Phone", SIPTarget: "sip:101@192.168.1.50",
-		Codec: domain.CodecG722, BufferMode: domain.BufferModeAnnouncement, DefaultVolume: 100,
+		Codec: domain.CodecG722, DefaultVolume: 100,
 	}}); err != nil {
 		t.Fatalf("RegisterPlayers failed: %v", err)
 	}
@@ -774,7 +741,6 @@ func TestBridgeService_ShutdownSendsByeSynchronously(t *testing.T) {
 
 	bridge.Shutdown()
 
-	// Immediately after Shutdown returns — no sleeps, no polling.
 	sipCaller.mu.Lock()
 	dialog := sipCaller.dialog
 	sipCaller.mu.Unlock()
@@ -797,15 +763,11 @@ func TestBridgeService_ShutdownSendsByeSynchronously(t *testing.T) {
 	}
 }
 
-// TestBridgeService_ShutdownStopsDiscoveryLoop verifies the per-player codec
-// discovery goroutines observe shutdown. They used to loop on a bare ticker
-// with no stop condition, so they kept re-registering players against an
-// ingress that StopAll had already torn down.
 func TestBridgeService_ShutdownStopsDiscoveryLoop(t *testing.T) {
 	bridge := NewBridgeService(
 		nil,
-		BridgeConfig{DefaultBufferMode: domain.BufferModeAnnouncement},
-		domain.NewTargetArbiter(domain.ConflictPolicyPreemptAnnouncements),
+		BridgeConfig{},
+		domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher),
 		&mockSIPCaller{}, &mockRTPStreamer{}, &mockIngress{}, nil,
 	)
 
@@ -828,7 +790,6 @@ func TestBridgeService_ShutdownStopsDiscoveryLoop(t *testing.T) {
 		t.Fatal("Shutdown blocked waiting for the discovery loop to exit")
 	}
 
-	// probeAndSyncPlayer must be inert once the service context is cancelled.
 	if bridge.ctx.Err() == nil {
 		t.Error("expected the service context to be cancelled after Shutdown")
 	}
@@ -851,3 +812,4 @@ func waitForCallAnswered(t *testing.T, bridge *BridgeService, playerID string) {
 	}
 	t.Fatalf("call for %s was never answered", playerID)
 }
+

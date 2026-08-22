@@ -6,13 +6,13 @@ import (
 )
 
 func TestTargetArbiter_Preemption(t *testing.T) {
-	arbiter := NewTargetArbiter(ConflictPolicyPreemptAnnouncements)
+	arbiter := NewTargetArbiter(ConflictPolicyPreemptHigher)
 
 	// 1. First session: Music on Target Ext 101 (Priority 1)
 	sess1 := NewCallSession("sess-1", "player-music", "sip:101@192.168.1.50", 1, StreamMetadata{
 		Title:     "Song A",
 		MediaType: "track",
-	}, BufferModeLive, 500*time.Millisecond)
+	}, 500*time.Millisecond)
 	sess1.SetState(StateActive)
 
 	preempted, err := arbiter.RequestTarget(sess1)
@@ -23,11 +23,11 @@ func TestTargetArbiter_Preemption(t *testing.T) {
 		t.Fatalf("expected no preemption for first session")
 	}
 
-	// 2. Second session: Incoming Announcement on the SAME Target Ext 101 (Priority 10)
+	// 2. Second session: Higher priority stream on the SAME Target Ext 101 (Priority 10)
 	sess2 := NewCallSession("sess-2", "player-tts", "sip:101@192.168.1.50", 10, StreamMetadata{
 		Title:     "Doorbell",
 		MediaType: "announcement",
-	}, BufferModeAnnouncement, 500*time.Millisecond)
+	}, 500*time.Millisecond)
 
 	preempted, err = arbiter.RequestTarget(sess2)
 	if err != nil {
@@ -37,15 +37,15 @@ func TestTargetArbiter_Preemption(t *testing.T) {
 		t.Fatalf("expected sess-1 to be preempted, got %v", preempted)
 	}
 
-	// 3. Third session: Low priority music trying to preempt active announcement
+	// 3. Third session: Low priority stream trying to preempt active high priority session
 	sess3 := NewCallSession("sess-3", "player-music-2", "sip:101@192.168.1.50", 1, StreamMetadata{
 		Title:     "Song B",
 		MediaType: "track",
-	}, BufferModeLive, 500*time.Millisecond)
+	}, 500*time.Millisecond)
 
 	_, err = arbiter.RequestTarget(sess3)
 	if err == nil {
-		t.Fatalf("expected error when low priority tries to claim busy target with announcement")
+		t.Fatalf("expected error when low priority tries to claim busy target")
 	}
 
 	// 4. Release active session
@@ -60,3 +60,4 @@ func TestTargetArbiter_Preemption(t *testing.T) {
 		t.Fatalf("expected no preemption after release")
 	}
 }
+

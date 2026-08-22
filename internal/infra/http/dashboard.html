@@ -931,10 +931,9 @@
       const prod = (st.producers && st.producers.length > 0) ? st.producers[0] : {};
       const cons = (st.consumers && st.consumers.length > 0) ? st.consumers[0] : {};
       const path = st.audio_path || {};
-
-      const playoutMode = (cons.buffer_mode || path.buffer_mode || 'announcement').toUpperCase();
       const activeCodec = (cons.active_codec || cons.config_codec || 'g722').toUpperCase();
       const isPassthrough = path.passthrough || (activeCodec === 'OPUS' && (path.volume_percent >= 100));
+
 
       const title = prod.title || prod.track || '';
       const artist = prod.artist || '';
@@ -954,10 +953,11 @@
       document.getElementById(`submeta-${id}`).innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
           ${st.is_grouped ? '<span class="pill-tag mode-live">SYNC GROUP</span>' : ''}
-          <span class="pill-tag ${playoutMode === 'LIVE' ? 'mode-live' : 'mode-announcement'}">${playoutMode} MODE</span>
+          <span class="pill-tag mode-live">LIVE SYNC</span>
         </div>
         ${nowPlayingHTML}
       `;
+
 
       const badge = document.getElementById(`badge-${id}`);
       badge.textContent = isPlaying ? 'STREAMING LIVE' : (isDialing ? 'SIP DIALING' : (st.state ? st.state.toUpperCase() : 'IDLE'));
@@ -1132,8 +1132,9 @@
         const currentPosition = (isPlaying || isPaused || isDialing) ? ((prod.track_progress_sec != null && prod.track_progress_sec > 0) ? prod.track_progress_sec : (cons.duration_sec || 0)) : 0;
         const trackDuration = prod.track_duration_sec || 0;
 
-        const upstreamChunks = path.upstream_chunks || path.pre_answer_buffered || 0;
+        const upstreamChunks = path.upstream_chunks || 0;
         const upstreamSec = (upstreamChunks * 20) / 1000;
+
 
         const convQueue = path.conversion_queue || 0;
         const convSec = (convQueue * 20) / 1000;
@@ -1194,20 +1195,15 @@
           }
         }
 
-        // 3. Streamlined Multi-Track Rows (Media Track, Announcement Pre-Answer Hold-Back Buffer, Upstream Ingest, Ready Queue)
+        // 3. Streamlined Multi-Track Rows (Media Track, Ingest Buffer, Ready Queue)
         const currentTitle = prod.title || prod.track || (isPlaying ? 'Active Audio Stream' : 'Idle Track');
         const currentArtist = prod.artist || '';
         const currentTrackLabel = currentArtist ? `${currentArtist} — ${currentTitle}` : currentTitle;
 
-        const isAnnouncementMode = (cons.buffer_mode || path.buffer_mode || '').toLowerCase() === 'announcement';
-        const preAnswerBuffered = path.pre_answer_buffered || cons.buffered_chunks || 0;
-        const preAnswerSec = (preAnswerBuffered * 20) / 1000;
-
-        // 3. Reordered Tracks (Media, Ingest Buffer, Ready Queue, and Pre-Answer Buffer LAST)
         const trackDefs = [
           { 
             id: 'media',
-            name: isAnnouncementMode ? '📢 Announcement' : '🎵 Media Track', 
+            name: '🎵 Media Track', 
             tag: isPlaying ? (trackDuration > 0 ? `${formatDuration(timePlayhead)} / ${formatDuration(trackDuration)}` : 'ACTIVE') : (isDialing ? 'DIALING' : 'IDLE'), 
             tagColor: '#ec4899',
             rowH: 44 
@@ -1228,32 +1224,15 @@
           }
         ];
 
-        if (isAnnouncementMode) {
-          trackDefs.push({
-            id: 'holdback',
-            name: '🛡️ Pre-Answer Buffer',
-            tag: isDialing ? `HOLDING (${preAnswerBuffered || upstreamChunks} chunks)` : (preAnswerBuffered > 0 ? `HELD ${Math.round(preAnswerSec * 1000)}ms` : '0ms HOLD'),
-            tagColor: '#f59e0b',
-            rowH: 38
-          });
-        }
-
         let startY = rulerH + 4;
         let streamBottomY = rulerH;
-        let holdbackY = 0;
-        let holdbackH = 0;
 
         for (let i = 0; i < trackDefs.length; i++) {
           const track = trackDefs[i];
           const y = startY;
           startY += track.rowH + 4;
 
-          if (track.id === 'media' || track.id === 'ingest' || track.id === 'ready') {
-            streamBottomY = y + track.rowH;
-          } else if (track.id === 'holdback') {
-            holdbackY = y;
-            holdbackH = track.rowH;
-          }
+          streamBottomY = y + track.rowH;
 
           // Track lane background
           ctx.fillStyle = '#0c1220';
@@ -1410,41 +1389,10 @@
             if (blockW > 50) {
               ctx.fillText(`Ready (${convQueue} frames)`, x1 + 6, y + 22);
             }
-          } else if (track.id === 'holdback') {
-            // Track 4: Pre-Answer Hold-Back Buffer (Directly from Go Announcement Hold-Back timestamps)
-            const hStart = path.holdback_start_sec != null ? path.holdback_start_sec : (isDialing ? 0 : timePlayhead);
-            const hEnd = path.holdback_end_sec != null ? path.holdback_end_sec : (isDialing ? Math.max(preAnswerSec, upstreamSec, 0.2) : (timePlayhead + preAnswerSec));
-
-            const x1 = Math.max(headerWidth, timeToX(hStart));
-            const x2 = Math.min(w, timeToX(hEnd));
-            const blockW = Math.max(6, x2 - x1);
-
-            ctx.fillStyle = 'rgba(245, 158, 11, 0.28)';
-            ctx.strokeStyle = '#f59e0b';
-            ctx.lineWidth = 1.5;
-            if (isDialing) {
-              ctx.setLineDash([4, 4]);
-            }
-            ctx.beginPath();
-            ctx.roundRect(x1, y + 4, blockW, track.rowH - 8, 4);
-            ctx.fill();
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            ctx.fillStyle = '#fef08a';
-            ctx.font = 'bold 10px JetBrains Mono';
-            if (blockW > 50) {
-              const holdMs = Math.round(Math.max(0, hEnd - hStart) * 1000);
-              if (isDialing) {
-                ctx.fillText(`⏳ Accumulating for 200 OK (${preAnswerBuffered || upstreamChunks} chunks • +${holdMs}ms)`, x1 + 6, y + 22);
-              } else {
-                ctx.fillText(`🛡️ Hold-Back Lag (${preAnswerBuffered} chunks • +${holdMs}ms preserved)`, x1 + 6, y + 22);
-              }
-            }
           }
         }
 
-        // 4. Stream Playhead Marker (Runs strictly down Media Track, Ingest Buffer, and Ready Queue)
+        // 4. Stream Playhead Marker
         const playheadX = timeToX(timePlayhead);
         if (playheadX >= headerWidth && playheadX <= w) {
           ctx.strokeStyle = '#00f0ff';
@@ -1454,7 +1402,7 @@
 
           ctx.beginPath();
           ctx.moveTo(playheadX, 0);
-          ctx.lineTo(playheadX, streamBottomY); // Only occupies the top stream bars!
+          ctx.lineTo(playheadX, streamBottomY);
           ctx.stroke();
           ctx.shadowBlur = 0;
 
@@ -1474,38 +1422,12 @@
           ctx.fillText(`▶ ${formatDuration(timePlayhead)}`, playheadX, rulerH + 12);
         }
 
-        // 5. Pre-Answer Buffer Playmarker (Confined strictly inside the Pre-Answer Buffer track row)
-        if (isAnnouncementMode && holdbackH > 0) {
-          const currentHoldStart = path.holdback_start_sec != null ? path.holdback_start_sec : (isDialing ? 0 : timePlayhead);
-          const holdMarkerX = timeToX(currentHoldStart);
-          if (holdMarkerX >= headerWidth && holdMarkerX <= w) {
-            ctx.strokeStyle = '#f59e0b';
-            ctx.lineWidth = 2;
-            ctx.shadowColor = '#f59e0b';
-            ctx.shadowBlur = 6;
-
-            ctx.beginPath();
-            ctx.moveTo(holdMarkerX, holdbackY);
-            ctx.lineTo(holdMarkerX, holdbackY + holdbackH); // ONLY in the Pre-Answer track row!
-            ctx.stroke();
-            ctx.shadowBlur = 0;
-
-            // Small Amber triangle at top of Pre-Answer track
-            ctx.fillStyle = '#f59e0b';
-            ctx.beginPath();
-            ctx.moveTo(holdMarkerX, holdbackY + 2);
-            ctx.lineTo(holdMarkerX - 4, holdbackY + 7);
-            ctx.lineTo(holdMarkerX + 4, holdbackY + 7);
-            ctx.closePath();
-            ctx.fill();
-          }
-        }
-
         ctx.restore();
       }
 
       requestAnimationFrame(drawTimelines);
     }
+
 
     async function openCodecsModal() {
       const modal = document.getElementById('codecsModal');

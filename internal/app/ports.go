@@ -30,23 +30,22 @@ type RTPStats struct {
 	BytesSent   uint64       `json:"bytes_sent"`
 
 	// Live audio path (updated on each PushAudio)
-	PathMode            string            `json:"path_mode,omitempty"` // "opus_passthrough" | "transcode" | "idle"
-	PathSummary         string            `json:"path_summary,omitempty"`
-	PathStages          []string          `json:"path_stages,omitempty"`
-	PathVolumePercent   int               `json:"path_volume_percent"`
-	PathIngressCodec    string            `json:"path_ingress_codec,omitempty"`
-	PathIngressRate     int               `json:"path_ingress_rate,omitempty"`
-	PathIngressChannels int               `json:"path_ingress_channels,omitempty"`
-	PassthroughPackets  uint64            `json:"passthrough_packets"`
-	TranscodePackets    uint64            `json:"transcode_packets"`
-	UpstreamChunks      int               `json:"upstream_chunks"`
-	ConversionQueue     int               `json:"conversion_queue"`
-	UpstreamPlayAtStart time.Time         `json:"upstream_play_at_start,omitempty"`
-	UpstreamPlayAtEnd   time.Time         `json:"upstream_play_at_end,omitempty"`
-	ReadyPlayAtStart    time.Time         `json:"ready_play_at_start,omitempty"`
-	ReadyPlayAtEnd      time.Time         `json:"ready_play_at_end,omitempty"`
-	BufferMode          domain.BufferMode `json:"buffer_mode,omitempty"`
-	Answered            bool              `json:"answered"`
+	PathMode            string    `json:"path_mode,omitempty"` // "opus_passthrough" | "transcode" | "idle"
+	PathSummary         string    `json:"path_summary,omitempty"`
+	PathStages          []string  `json:"path_stages,omitempty"`
+	PathVolumePercent   int       `json:"path_volume_percent"`
+	PathIngressCodec    string    `json:"path_ingress_codec,omitempty"`
+	PathIngressRate     int       `json:"path_ingress_rate,omitempty"`
+	PathIngressChannels int       `json:"path_ingress_channels,omitempty"`
+	PassthroughPackets  uint64    `json:"passthrough_packets"`
+	TranscodePackets    uint64    `json:"transcode_packets"`
+	UpstreamChunks      int       `json:"upstream_chunks"`
+	ConversionQueue     int       `json:"conversion_queue"`
+	UpstreamPlayAtStart time.Time `json:"upstream_play_at_start,omitempty"`
+	UpstreamPlayAtEnd   time.Time `json:"upstream_play_at_end,omitempty"`
+	ReadyPlayAtStart    time.Time `json:"ready_play_at_start,omitempty"`
+	ReadyPlayAtEnd      time.Time `json:"ready_play_at_end,omitempty"`
+	Answered            bool      `json:"answered"`
 }
 
 // AudioPathDebugInfo describes the end-to-end processing pipeline for a stream.
@@ -61,8 +60,6 @@ type AudioPathDebugInfo struct {
 	IngressFormat      string   `json:"ingress_format,omitempty"`
 	EgressCodec        string   `json:"egress_codec,omitempty"`
 	EgressFormat       string   `json:"egress_format,omitempty"`
-	BufferMode         string   `json:"buffer_mode,omitempty"`
-	PreAnswerBuffered  int      `json:"pre_answer_buffered,omitempty"`
 	UpstreamChunks     int      `json:"upstream_chunks,omitempty"`
 	ConversionQueue    int      `json:"conversion_queue,omitempty"`
 	PassthroughPackets uint64   `json:"passthrough_packets,omitempty"`
@@ -71,8 +68,6 @@ type AudioPathDebugInfo struct {
 	BufferEndSec       float64  `json:"buffer_end_sec,omitempty"`
 	ReadyStartSec      float64  `json:"ready_start_sec,omitempty"`
 	ReadyEndSec        float64  `json:"ready_end_sec,omitempty"`
-	HoldBackStartSec   float64  `json:"holdback_start_sec,omitempty"`
-	HoldBackEndSec     float64  `json:"holdback_end_sec,omitempty"`
 	PlayheadSec        float64  `json:"playhead_sec,omitempty"`
 }
 
@@ -93,15 +88,15 @@ type IngressPlayerStats struct {
 
 // ProducerDebugInfo details the upstream audio ingress source.
 type ProducerDebugInfo struct {
-	Type           string   `json:"type"` // "Sendspin Ingress"
-	URL            string   `json:"url"`
-	Connected      bool     `json:"connected"`
-	Format         string   `json:"format"` // e.g. "PCM 16000Hz 1ch 16bit" or "Opus 48000Hz 2ch"
-	Codec          string   `json:"codec"`
-	SampleRate     int      `json:"sample_rate"`
-	Channels       int      `json:"channels"`
-	BitDepth       int      `json:"bit_depth"`
-	BitrateKbps    int      `json:"bitrate_kbps,omitempty"`
+	Type             string   `json:"type"` // "Sendspin Ingress"
+	URL              string   `json:"url"`
+	Connected        bool     `json:"connected"`
+	Format           string   `json:"format"` // e.g. "PCM 16000Hz 1ch 16bit" or "Opus 48000Hz 2ch"
+	Codec            string   `json:"codec"`
+	SampleRate       int      `json:"sample_rate"`
+	Channels         int      `json:"channels"`
+	BitDepth         int      `json:"bit_depth"`
+	BitrateKbps      int      `json:"bitrate_kbps,omitempty"`
 	OfferedFormats   []string `json:"offered_formats,omitempty"` // e.g. ["PCM 16000Hz 1ch 16bit", "PCM 48000Hz 2ch 16bit"]
 	ExposedCodecs    []string `json:"exposed_codecs,omitempty"`  // e.g. ["opus", "pcm"]
 	State            string   `json:"state"`
@@ -127,20 +122,18 @@ type ConsumerDebugInfo struct {
 	DiscoveredCodecs []string `json:"discovered_codecs,omitempty"` // Discovered via SIP OPTIONS probe
 	OfferedCodecs    []string `json:"offered_codecs,omitempty"`    // SDP Codecs offered in INVITE
 	NegotiatedSDP    string   `json:"negotiated_sdp,omitempty"`
-	RTPClockRate   uint32   `json:"rtp_clock_rate,omitempty"`
-	PayloadType    uint8    `json:"payload_type,omitempty"`
-	Format         string   `json:"format"` // e.g. "G.722 16000Hz 1ch (64 kbps)"
-	LocalRTP       string   `json:"local_rtp,omitempty"`
-	RemoteRTP      string   `json:"remote_rtp,omitempty"`
-	AutoAnswer     string   `json:"auto_answer,omitempty"`
-	BufferMode     string   `json:"buffer_mode"`
-	Priority       int      `json:"priority"`
-	BufferedChunks int      `json:"buffered_chunks"`
-	LingerActive   bool     `json:"linger_active"`
-	PacketsSent    uint64   `json:"packets_sent"`
-	BytesSent      uint64   `json:"bytes_sent"`
-	BitrateKbps    int      `json:"bitrate_kbps,omitempty"`
-	DurationSec    float64  `json:"duration_sec"`
+	RTPClockRate     uint32   `json:"rtp_clock_rate,omitempty"`
+	PayloadType      uint8    `json:"payload_type,omitempty"`
+	Format           string   `json:"format"` // e.g. "G.722 16000Hz 1ch (64 kbps)"
+	LocalRTP         string   `json:"local_rtp,omitempty"`
+	RemoteRTP        string   `json:"remote_rtp,omitempty"`
+	AutoAnswer       string   `json:"auto_answer,omitempty"`
+	Priority         int      `json:"priority"`
+	LingerActive     bool     `json:"linger_active"`
+	PacketsSent      uint64   `json:"packets_sent"`
+	BytesSent        uint64   `json:"bytes_sent"`
+	BitrateKbps      int      `json:"bitrate_kbps,omitempty"`
+	DurationSec      float64  `json:"duration_sec"`
 }
 
 // StreamDebugInfo provides comprehensive debug information for a virtual player stream.
@@ -201,23 +194,20 @@ type RTPSession interface {
 	StartTransmission(remoteAddr *net.UDPAddr) error
 	// SetCodec updates the transmission codec if negotiated dynamically via SDP answer.
 	SetCodec(codec domain.Codec)
-	// SetBufferMode updates the playout buffering mode (announcement vs live).
-	SetBufferMode(mode domain.BufferMode)
 	// SetAnswered sets whether the SIP call has been answered.
 	SetAnswered(answered bool)
 	// SetVolume updates the gain level and flushes converted frames while preserving raw upstream audio.
 	SetVolume(volumePercent int)
 	// PushAudio sends raw audio chunks from Sendspin into the Upstream stage.
 	PushAudio(chunk domain.AudioChunk, volumePercent int) error
-	// InjectSilence feeds silence frames into the pipeline to preserve announcement hold-back lag on seek/track transition.
-	InjectSilence(duration time.Duration)
-	// ClearBuffer flushes all 3 stages (Upstream, Conversion, Downstream) on seek / stream clear.
+	// ClearBuffer flushes all stages on seek / stream clear.
 	ClearBuffer()
 	// DrainAndClose waits for drainDelay then closes the RTP socket.
 	DrainAndClose(drainDelay time.Duration) error
 	// Stats returns packet and byte transmission counters.
 	Stats() RTPStats
 }
+
 
 // AudioTranscoderPort defines the interface for resampling, volume adjustment, and codec encoding.
 type AudioTranscoderPort interface {

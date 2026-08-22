@@ -69,10 +69,9 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 	// 3. Layer 2: Audio Path (DSP & conversion engine wrapping Layer 1)
 	audioPath := NewAudioPath(s.transcoderFactory(), upstream, activeCodec, 100)
 
-	// 4. Layer 3: Downstream Player (playout mode & timing policy wrapping Layer 2 & Layer 4)
+	// 4. Layer 3: Downstream Player (playout timing policy wrapping Layer 2 & Layer 4)
 	downstream := NewDownstreamPlayer(
 		s.logger,
-		domain.BufferModeAnnouncement,
 		activeCodec,
 		audioPath,
 		transport,
@@ -81,7 +80,6 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 	sess := &Session{
 		logger:     s.logger,
 		codec:      activeCodec,
-		bufferMode: domain.BufferModeAnnouncement,
 		upstream:   upstream,
 		audioPath:  audioPath,
 		downstream: downstream,
@@ -94,12 +92,11 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 
 // Session implements app.RTPSession coordinating the 4 decoupled layers.
 type Session struct {
-	mu         sync.Mutex
-	logger     *slog.Logger
-	codec      domain.Codec
-	bufferMode domain.BufferMode
-	answered   bool
-	curVolume  atomic.Int32
+	mu        sync.Mutex
+	logger    *slog.Logger
+	codec     domain.Codec
+	answered  bool
+	curVolume atomic.Int32
 
 	upstream   *UpstreamPlayer
 	audioPath  *AudioPath
@@ -110,18 +107,6 @@ type Session struct {
 // LocalPort returns the bound UDP port on RTPTransport.
 func (s *Session) LocalPort() int {
 	return s.transport.LocalPort()
-}
-
-// SetBufferMode sets playout policy in DownstreamPlayer.
-func (s *Session) SetBufferMode(mode domain.BufferMode) {
-	s.mu.Lock()
-	if mode == "" {
-		mode = domain.BufferModeAnnouncement
-	}
-	s.bufferMode = mode
-	s.mu.Unlock()
-
-	s.downstream.SetBufferMode(mode)
 }
 
 // SetAnswered marks call as answered in DownstreamPlayer.
@@ -173,24 +158,6 @@ func (s *Session) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 	return nil
 }
 
-// InjectSilence feeds raw PCM silence into UpstreamPlayer to preserve the announcement holdback buffer lag.
-func (s *Session) InjectSilence(duration time.Duration) {
-	if duration <= 0 {
-		return
-	}
-	// 20ms of stereo 48kHz PCM silence (48000 * 2 * 0.02 = 1920 int32 samples)
-	sampleCount := (48000 * 2 * 20) / 1000
-	numChunks := int(duration / (20 * time.Millisecond))
-	for i := 0; i < numChunks; i++ {
-		s.upstream.Push(domain.AudioChunk{
-			Samples:    make([]int32, sampleCount),
-			SampleRate: 48000,
-			Channels:   2,
-			BitDepth:   16,
-		})
-	}
-}
-
 // ClearBuffer synchronously resets all layers on seek or stream stop.
 func (s *Session) ClearBuffer() {
 	s.audioPath.Clear()
@@ -201,7 +168,6 @@ func (s *Session) ClearBuffer() {
 func (s *Session) Stats() app.RTPStats {
 	s.mu.Lock()
 	codec := s.codec
-	mode := s.bufferMode
 	answered := s.answered
 	s.mu.Unlock()
 
@@ -241,7 +207,6 @@ func (s *Session) Stats() app.RTPStats {
 		UpstreamPlayAtEnd:   upNewest,
 		ReadyPlayAtStart:    readyOldest,
 		ReadyPlayAtEnd:      readyNewest,
-		BufferMode:          mode,
 		Answered:            answered,
 	}
 }

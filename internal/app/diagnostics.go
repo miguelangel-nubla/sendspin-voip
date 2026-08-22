@@ -9,23 +9,21 @@ import (
 )
 
 type callDiagnosticsSnapshot struct {
-	hasCall             bool
-	sessionState        string
-	effectiveBufferMode string
-	priority            int
-	lingerActive        bool
-	answered            bool
-	startTime           time.Time
-	answerTime          time.Time
-	streamStartProgSec  float64
-	callID              string
-	rtpStats            RTPStats
+	hasCall            bool
+	sessionState       string
+	priority           int
+	lingerActive       bool
+	answered           bool
+	startTime          time.Time
+	answerTime         time.Time
+	streamStartProgSec float64
+	callID             string
+	rtpStats           RTPStats
 }
 
 // buildStreamDebugInfo compiles real-time diagnostics for a virtual player stream.
 func buildStreamDebugInfo(
 	player *domain.Player,
-	defaultBufferMode domain.BufferMode,
 	ingStats IngressPlayerStats,
 	hasIngress bool,
 	discoveredCodecs []string,
@@ -156,8 +154,6 @@ func buildStreamDebugInfo(
 			activeCodec = call.rtpStats.Codec
 		}
 
-		bufferedCount := call.rtpStats.UpstreamChunks
-
 		if call.lingerActive {
 			info.State = "lingering"
 			call.sessionState = "lingering"
@@ -195,12 +191,6 @@ func buildStreamDebugInfo(
 		egressFormat := activeCodec.FormatDescription(egressCh, bitrateOut)
 		info.AudioPath.EgressCodec = string(activeCodec)
 		info.AudioPath.EgressFormat = egressFormat
-		info.AudioPath.BufferMode = call.effectiveBufferMode
-		if call.effectiveBufferMode == "announcement" {
-			info.AudioPath.PreAnswerBuffered = bufferedCount
-		} else {
-			info.AudioPath.PreAnswerBuffered = 0
-		}
 		info.AudioPath.UpstreamChunks = call.rtpStats.UpstreamChunks
 		info.AudioPath.ConversionQueue = call.rtpStats.ConversionQueue
 		info.AudioPath.PassthroughPackets = call.rtpStats.PassthroughPackets
@@ -242,44 +232,18 @@ func buildStreamDebugInfo(
 		info.AudioPath.ReadyStartSec = trackProgSec + readyStartOffset
 		info.AudioPath.ReadyEndSec = trackProgSec + readyEndOffset
 
-		if call.effectiveBufferMode == "announcement" {
-			var dialDelaySec float64
-			if !call.startTime.IsZero() {
-				if call.answered && !call.answerTime.IsZero() {
-					dialDelaySec = call.answerTime.Sub(call.startTime).Seconds()
-				} else {
-					dialDelaySec = time.Since(call.startTime).Seconds()
-				}
-			}
-			info.AudioPath.PreAnswerBuffered = int(dialDelaySec / 0.02)
-
-			if !call.answered {
-				info.AudioPath.HoldBackStartSec = call.streamStartProgSec
-				info.AudioPath.HoldBackEndSec = call.streamStartProgSec + dialDelaySec
-			} else {
-				phonePlayoutSec := call.streamStartProgSec + durationSec
-				if phonePlayoutSec > trackProgSec {
-					phonePlayoutSec = trackProgSec
-				}
-				info.AudioPath.HoldBackStartSec = phonePlayoutSec
-				info.AudioPath.HoldBackEndSec = phonePlayoutSec + dialDelaySec
-			}
-		} else {
-			info.AudioPath.PreAnswerBuffered = 0
-		}
-
 		volDesc := volumeStageForDebug(info.AudioPath.VolumePercent, muted)
 
 		switch {
 		case !call.answered:
 			info.AudioPath.Mode = "buffering"
 			info.AudioPath.Passthrough = false
-			info.AudioPath.Summary = fmt.Sprintf("1. Upstream buffer (%d chunks, mode=%s) → 2. Transcode (%s) → 3. RTP %s",
-				bufferedCount, call.effectiveBufferMode, volDesc, activeCodec.DisplayName())
+			info.AudioPath.Summary = fmt.Sprintf("Live audio queue (%d chunks) → Transcode (%s) → RTP %s",
+				call.rtpStats.UpstreamChunks, volDesc, activeCodec.DisplayName())
 			info.AudioPath.Stages = []string{
-				fmt.Sprintf("Stage 1: Upstream Ingestion & Raw Buffer (%d chunks, start protected)", bufferedCount),
+				fmt.Sprintf("Stage 1: Upstream Ingestion & Raw Queue (%d chunks)", call.rtpStats.UpstreamChunks),
 				fmt.Sprintf("Stage 2: Transcoding & Gain (%s, ready on SIP 200 OK)", volDesc),
-				fmt.Sprintf("Stage 3: Downstream RTP Playout (%s mode, waiting for answer)", strings.ToUpper(call.effectiveBufferMode)),
+				"Stage 3: Downstream RTP Playout (Live sync, waiting for answer)",
 			}
 		case call.rtpStats.PathMode != "":
 			info.AudioPath.Mode = call.rtpStats.PathMode
@@ -300,7 +264,7 @@ func buildStreamDebugInfo(
 			info.AudioPath.Stages = []string{
 				"Stage 1: Upstream Ingress (" + prodFormat + ")",
 				fmt.Sprintf("Stage 2: Transcode (%s) → %s", volDesc, activeCodec.DisplayName()),
-				fmt.Sprintf("Stage 3: Downstream Playout (%s, 20ms pacing)", strings.ToUpper(call.effectiveBufferMode)),
+				"Stage 3: Downstream Playout (Live sync, 20ms pacing)",
 			}
 		default:
 			info.AudioPath.Mode = "dialing"
@@ -324,9 +288,7 @@ func buildStreamDebugInfo(
 			LocalRTP:         localRTPStr,
 			RemoteRTP:        call.rtpStats.RemoteAddr,
 			AutoAnswer:       autoAnswerDesc,
-			BufferMode:       call.effectiveBufferMode,
 			Priority:         call.priority,
-			BufferedChunks:   bufferedCount,
 			LingerActive:     call.lingerActive,
 			PacketsSent:      call.rtpStats.PacketsSent,
 			BytesSent:        call.rtpStats.BytesSent,
@@ -334,15 +296,10 @@ func buildStreamDebugInfo(
 			DurationSec:      durationSec,
 		})
 	} else {
-		bMode := cfg.BufferMode
-		if bMode == "" {
-			bMode = defaultBufferMode
-		}
 		bitrateOut := cfg.Codec.DefaultBitrateKbps()
 		egressFormat := cfg.Codec.FormatDescription(1, bitrateOut)
 		info.AudioPath.EgressCodec = string(cfg.Codec)
 		info.AudioPath.EgressFormat = egressFormat
-		info.AudioPath.BufferMode = string(bMode)
 		info.AudioPath.Summary = "idle — " + prodFormat + " ⇢ (no call) ⇢ " + cfg.Codec.DisplayName()
 		info.AudioPath.Stages = []string{
 			"Stage 1: Upstream Ingress (" + prodFormat + ")",
@@ -363,7 +320,6 @@ func buildStreamDebugInfo(
 			PayloadType:      cfg.Codec.PayloadType(),
 			Format:           egressFormat,
 			AutoAnswer:       autoAnswerDesc,
-			BufferMode:       string(bMode),
 			Priority:         cfg.Priority,
 			BitrateKbps:      bitrateOut,
 		})

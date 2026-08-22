@@ -24,24 +24,20 @@ sendspin:
   buffer_ms: 600
 
 bridge:
-  default_buffer_mode: "announcement"
-  pickup_buffer_ms: 2500
   drain_delay_ms: 400
-  target_conflict_policy: "preempt_for_announcements"
+  target_conflict_policy: "preempt_higher"
 
 players:
   - id: "office_phone_announcements"
     name: "Office Desk (Announcements)"
     sip_target: "sip:101@192.168.1.50"
     codec: "g722"
-    buffer_mode: "announcement"
     priority: 10
 
   - id: "office_phone_music"
     name: "Office Desk (Music)"
     sip_target: "sip:101@192.168.1.50"
     codec: "g722"
-    buffer_mode: "live"
     priority: 1
 `
 	tmpFile, err := os.CreateTemp("", "sendspin-config-*.yaml")
@@ -75,21 +71,8 @@ players:
 	if domainPlayers[0].Codec != domain.CodecG722 {
 		t.Errorf("expected g722 codec, got %s", domainPlayers[0].Codec)
 	}
-	if domainPlayers[0].BufferMode != domain.BufferModeAnnouncement {
-		t.Errorf("expected announcement buffer mode, got %s", domainPlayers[0].BufferMode)
-	}
-	if domainPlayers[1].BufferMode != domain.BufferModeLive {
-		t.Errorf("expected live buffer mode, got %s", domainPlayers[1].BufferMode)
-	}
 }
 
-// TestValidate_RejectsUnknownEnums covers the enum fields that are consumed by
-// switch statements with no default branch. An unrecognised value used to be
-// accepted at startup and then quietly change behaviour: an unknown conflict
-// policy makes the arbiter reject every call to a busy target, an unknown
-// buffer mode makes the bridge discard pre-answer audio (clipping the start of
-// every announcement), and an unknown auto-answer preset drops the
-// auto-answer header so the phone just rings.
 func TestValidate_RejectsUnknownEnums(t *testing.T) {
 	base := func() *AppConfig {
 		cfg := DefaultConfig()
@@ -102,7 +85,6 @@ func TestValidate_RejectsUnknownEnums(t *testing.T) {
 		mutate func(*AppConfig)
 	}{
 		{"unknown conflict policy", func(c *AppConfig) { c.Bridge.ConflictPolicy = "preempt-always" }},
-		{"unknown buffer mode", func(c *AppConfig) { c.Bridge.DefaultBufferMode = "anouncement" }},
 		{"unknown auto answer preset", func(c *AppConfig) { c.SIP.AutoAnswerPreset = "yealnk" }},
 		{"unknown transport", func(c *AppConfig) { c.SIP.Transport = "sctp" }},
 		{"rtp range inverted", func(c *AppConfig) { c.SIP.RTPPortMin, c.SIP.RTPPortMax = 20000, 10000 }},

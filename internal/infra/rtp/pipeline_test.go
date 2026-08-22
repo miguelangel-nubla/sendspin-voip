@@ -125,9 +125,9 @@ func TestAudioPath_VolumeChangeRewindsAndReEncodesUnplayed(t *testing.T) {
 	}
 }
 
-// TestDownstreamPlayer_LiveModeDialDelayInstantCatchUp verifies that after a slow SIP dial (e.g. 3s),
+// TestDownstreamPlayer_LiveDialDelayInstantCatchUp verifies that after a slow SIP dial (e.g. 2s),
 // DownstreamPlayer instantly discards stale audio before conversion and begins streaming real-time live frames.
-func TestDownstreamPlayer_LiveModeDialDelayInstantCatchUp(t *testing.T) {
+func TestDownstreamPlayer_LiveDialDelayInstantCatchUp(t *testing.T) {
 	streamer := NewStreamer(nil, func() app.AudioTranscoderPort {
 		return audio.NewTranscoder()
 	}, 20800, 20850)
@@ -137,8 +137,6 @@ func TestDownstreamPlayer_LiveModeDialDelayInstantCatchUp(t *testing.T) {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
 	defer func() { _ = sess.DrainAndClose(0) }()
-
-	sess.SetBufferMode(domain.BufferModeLive)
 
 	// Simulate 100 chunks (~2 seconds) pushed during slow SIP dial (scheduled in the past)
 	pastBase := time.Now().Add(-2 * time.Second)
@@ -184,64 +182,7 @@ func TestDownstreamPlayer_LiveModeDialDelayInstantCatchUp(t *testing.T) {
 	}
 }
 
-// TestDownstreamPlayer_AnnouncementPlaysFromSample0 verifies that in Announcement mode,
-// pre-dial buffered chunks play out sequentially from sample 0 once answered.
-func TestDownstreamPlayer_AnnouncementPlaysFromSample0(t *testing.T) {
-	streamer := NewStreamer(nil, func() app.AudioTranscoderPort {
-		return audio.NewTranscoder()
-	}, 20900, 20950)
-
-	sess, err := streamer.CreateSession(domain.CodecG722)
-	if err != nil {
-		t.Fatalf("CreateSession failed: %v", err)
-	}
-	defer func() { _ = sess.DrainAndClose(0) }()
-
-	sess.SetBufferMode(domain.BufferModeAnnouncement)
-
-	// Push 3 chunks before answer
-	for i := 1; i <= 3; i++ {
-		samples := make([]int32, 1920)
-		for j := range samples {
-			samples[j] = int32(i * 1000)
-		}
-		_ = sess.PushAudio(domain.AudioChunk{
-			Timestamp:  int64(i * 20000),
-			Samples:    samples,
-			SampleRate: 48000,
-			Channels:   2,
-		}, 100)
-	}
-
-	recvConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer recvConn.Close()
-
-	if err := sess.StartTransmission(recvConn.LocalAddr().(*net.UDPAddr)); err != nil {
-		t.Fatal(err)
-	}
-
-	_ = recvConn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
-	buf := make([]byte, 1500)
-	receivedCount := 0
-	for i := 0; i < 3; i++ {
-		n, _, err := recvConn.ReadFromUDP(buf)
-		if err != nil {
-			break
-		}
-		if n >= 12 {
-			receivedCount++
-		}
-	}
-
-	if receivedCount < 2 {
-		t.Fatalf("expected at least 2 packets received from announcement pre-buffer, got %d", receivedCount)
-	}
-}
-
-// TestPipeline_ClearBufferFlushesAllLayers verifies that ClearBuffer resets all 4 layers.
+// TestPipeline_ClearBufferFlushesAllLayers verifies that ClearBuffer resets all layers.
 func TestPipeline_ClearBufferFlushesAllLayers(t *testing.T) {
 	streamer := NewStreamer(nil, func() app.AudioTranscoderPort {
 		return audio.NewTranscoder()
@@ -280,8 +221,6 @@ func TestGaplessPlayback_NextSongPreBuffering(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = sess.DrainAndClose(0) }()
-
-	sess.SetBufferMode(domain.BufferModeLive)
 
 	baseTime := time.Now().Add(20 * time.Millisecond)
 

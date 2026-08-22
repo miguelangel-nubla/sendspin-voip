@@ -71,8 +71,6 @@ func TestHTTPServer_Endpoints(t *testing.T) {
 	bridge := app.NewBridgeService(
 		nil,
 		app.BridgeConfig{
-			DefaultBufferMode: domain.BufferModeAnnouncement,
-			PickupBufferMs:    500,
 			DrainDelayMs:      50,
 			IdleHangupDelayMs: 2000,
 		},
@@ -85,13 +83,13 @@ func TestHTTPServer_Endpoints(t *testing.T) {
 
 	_ = bridge.RegisterPlayers([]domain.PlayerConfig{
 		{
-			ID:         "desk_phone",
-			Name:       "Office Desk Phone",
-			SIPTarget:  "sip:101@127.0.0.1",
-			Codec:      domain.CodecG722,
-			BufferMode: domain.BufferModeLive,
+			ID:        "desk_phone",
+			Name:      "Office Desk Phone",
+			SIPTarget: "sip:101@127.0.0.1",
+			Codec:     domain.CodecG722,
 		},
 	})
+
 
 	srv := NewServer(nil, ServerConfig{
 		Listen:    ":8080",
@@ -173,13 +171,14 @@ func TestHTTPServer_APITokenAuth(t *testing.T) {
 	sipCaller := &dummySIPCaller{}
 	bridge := app.NewBridgeService(
 		nil,
-		app.BridgeConfig{DefaultBufferMode: domain.BufferModeAnnouncement},
+		app.BridgeConfig{},
 		domain.NewTargetArbiter(""),
 		sipCaller,
 		&dummyRTPStreamer{},
 		&dummyIngress{},
 		nil,
 	)
+
 
 	srv := NewServer(nil, ServerConfig{
 		Listen:   ":8080",

@@ -5,28 +5,6 @@ import (
 	"strings"
 )
 
-// BufferMode defines how audio chunks are buffered and scheduled during SIP call setup.
-type BufferMode string
-
-const (
-	// BufferModeAnnouncement buffers all audio during SIP handshake and plays from sample 0 (zero speech loss).
-	BufferModeAnnouncement BufferMode = "announcement"
-	// BufferModeLive discards pre-connect audio to immediately lock into live multi-room clock synchronization.
-	BufferModeLive BufferMode = "live"
-)
-
-// ParseBufferMode normalizes and validates a buffer mode.
-func ParseBufferMode(s string) (BufferMode, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "announcement", "fifo", "buffered", "":
-		return BufferModeAnnouncement, nil
-	case "live", "sync", "realtime":
-		return BufferModeLive, nil
-	default:
-		return "", fmt.Errorf("invalid buffer_mode %q (allowed: announcement, live)", s)
-	}
-}
-
 // AutoAnswerPreset defines standard auto-answer headers for various VoIP hardware.
 type AutoAnswerPreset string
 
@@ -65,12 +43,10 @@ type PlayerConfig struct {
 	Name                   string           `yaml:"name" json:"name"`
 	SIPTarget              string           `yaml:"sip_target" json:"sip_target"`
 	Codec                  Codec            `yaml:"codec" json:"codec"`
-	BufferMode             BufferMode       `yaml:"buffer_mode" json:"buffer_mode"`
 	AutoAnswer             AutoAnswerPreset `yaml:"auto_answer" json:"auto_answer"`
 	CustomAutoAnswerHeader string           `yaml:"custom_auto_answer_header" json:"custom_auto_answer_header"`
 	Priority               int              `yaml:"priority" json:"priority"` // Higher priority preempts lower
 	DefaultVolume          int              `yaml:"default_volume" json:"default_volume"`
-	PreAnswerBufferSec     int              `yaml:"pre_answer_buffer_sec" json:"pre_answer_buffer_sec"`
 }
 
 // Player represents the state of a registered virtual player.
@@ -99,9 +75,6 @@ func NewPlayer(cfg PlayerConfig) (*Player, error) {
 		return nil, fmt.Errorf("player %q requires a valid sip_target", cfg.ID)
 	}
 	// Empty Codec means "auto": use downstream discovery order (no forced preference).
-	if cfg.BufferMode == "" {
-		cfg.BufferMode = BufferModeAnnouncement
-	}
 	if cfg.AutoAnswer == "" {
 		cfg.AutoAnswer = AutoAnswerDefault
 	}
@@ -115,3 +88,4 @@ func NewPlayer(cfg PlayerConfig) (*Player, error) {
 		IsMuted: false,
 	}, nil
 }
+
