@@ -278,3 +278,40 @@ func TestGaplessPlayback_NextSongPreBuffering(t *testing.T) {
 		t.Fatalf("expected 3 packets received across gapless song transition, got %d", packetCount)
 	}
 }
+
+// TestUpstreamPlayer_SeekDiscontinuityDetection verifies that seek timeline jumps
+// immediately trigger a buffer reset rather than appending to old pre-seek audio.
+func TestUpstreamPlayer_SeekDiscontinuityDetection(t *testing.T) {
+	upstream := NewUpstreamPlayer(0)
+	now := time.Now()
+
+	// Initial continuous stream (chunks at 0ms, 20ms, 40ms)
+	upstream.Push(domain.AudioChunk{PlayAt: now, Timestamp: 1000})
+	upstream.Push(domain.AudioChunk{PlayAt: now.Add(20 * time.Millisecond), Timestamp: 21000})
+	upstream.Push(domain.AudioChunk{PlayAt: now.Add(40 * time.Millisecond), Timestamp: 41000})
+
+	if upstream.Len() != 3 {
+		t.Fatalf("expected 3 chunks, got %d", upstream.Len())
+	}
+
+	// Seek forward by 30 seconds
+	seekChunk := domain.AudioChunk{
+		PlayAt:    now.Add(30 * time.Second),
+		Timestamp: 30000000,
+	}
+	discontinuity := upstream.Push(seekChunk)
+	if !discontinuity {
+		t.Fatal("expected discontinuity detected on 30s forward seek")
+	}
+
+	// Seek backward by 10 seconds
+	upstream.Push(domain.AudioChunk{PlayAt: now.Add(30 * time.Second), Timestamp: 30000000})
+	backwardSeek := domain.AudioChunk{
+		PlayAt:    now.Add(20 * time.Second),
+		Timestamp: 20000000,
+	}
+	discontinuityBack := upstream.Push(backwardSeek)
+	if !discontinuityBack {
+		t.Fatal("expected discontinuity detected on 10s backward seek")
+	}
+}

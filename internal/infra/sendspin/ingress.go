@@ -13,6 +13,7 @@ import (
 
 	"github.com/Sendspin/sendspin-go/pkg/discovery"
 	"github.com/Sendspin/sendspin-go/pkg/protocol"
+	sendspinsync "github.com/Sendspin/sendspin-go/pkg/sync"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/app"
 	"github.com/miguelangel-nubla/sendspin-voip/internal/domain"
 	"github.com/pion/opus"
@@ -68,10 +69,8 @@ type playerWorker struct {
 	isMuted         bool
 	chunksReceived  uint64
 	bytesReceived   uint64
-
-	// clockOffsetUs maps Sendspin server timestamps to local wall clock (PlayAt).
-	clockOffsetUs int64
-	clockSynced   bool
+	// clockSync implements official Sendspin Kalman filter time synchronization.
+	clockSync *sendspinsync.ClockSync
 }
 
 // setClient publishes the protocol client for the current connection attempt.
@@ -281,6 +280,7 @@ func (ing *Ingress) RegisterPlayerWithCodecs(player domain.PlayerConfig, codecs 
 		ctx:           ctx,
 		currentVolume: initialVol,
 		isMuted:       initialMuted,
+		clockSync:     sendspinsync.NewClockSync(),
 	}
 	ing.workers[player.ID] = worker
 
@@ -510,8 +510,6 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		w.currentChannels = primaryChannels
 		w.currentBitDepth = primaryBitDepth
 		w.offeredFormats = offeredFmtStrings
-		w.clockSynced = false
-		w.clockOffsetUs = 0
 		w.statsMu.Unlock()
 
 		w.setClient(client)
@@ -536,6 +534,10 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 		pcm16Buf := make([]int16, maxOpusFrameSamples*maxOpusChannels)
 
 		done := client.Done()
+		_ = client.SendTimeSync(time.Now().UnixMicro())
+
+		timeSyncTicker := time.NewTicker(2 * time.Second)
+		defer timeSyncTicker.Stop()
 
 	eventLoop:
 		for {
@@ -554,7 +556,32 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				ing.logger.Warn("Sendspin player disconnected, will reconnect", "player_id", w.cfg.ID)
 				break eventLoop
 
+			case <-timeSyncTicker.C:
+				_ = client.SendTimeSync(time.Now().UnixMicro())
+
+			case timeResp := <-client.TimeSyncResp:
+				t4 := time.Now().UnixMicro()
+				w.statsMu.Lock()
+				if w.clockSync != nil {
+					w.clockSync.ProcessSyncResponse(
+						timeResp.ClientTransmitted,
+						timeResp.ServerReceived,
+						timeResp.ServerTransmitted,
+						t4,
+					)
+				}
+				w.statsMu.Unlock()
+
 			case startMsg := <-client.StreamStart:
+				// Drain any remaining stale chunks in client.AudioChunks channel from previous stream/seek
+				for {
+					select {
+					case <-client.AudioChunks:
+					default:
+						goto startDrained
+					}
+				}
+			startDrained:
 				if startMsg.Player != nil {
 					currentCodec = strings.ToLower(startMsg.Player.Codec)
 					if currentCodec == "" {
@@ -579,8 +606,6 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 				w.currentRate = currentRate
 				w.currentChannels = currentChannels
 				w.currentBitDepth = currentBitDepth
-				w.clockSynced = false
-				w.clockOffsetUs = 0
 				w.statsMu.Unlock()
 
 				if dec, err := opus.NewDecoderWithOutput(48000, currentChannels); err == nil {
@@ -591,8 +616,9 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					ing.logger.Warn("Failed to build Opus decoder for stream format",
 						"player_id", w.cfg.ID, "channels", currentChannels, "err", err)
 				}
-				currentMeta.ProgressMs = 0
-				currentMeta.ProgressUpdated = time.Now()
+				if currentMeta.ProgressUpdated.IsZero() {
+					currentMeta.ProgressUpdated = time.Now()
+				}
 				w.statsMu.Lock()
 				w.currentMeta = currentMeta
 				w.statsMu.Unlock()
@@ -604,6 +630,7 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 					"channels", currentChannels,
 					"bit_depth", currentBitDepth,
 					"title", currentMeta.Title,
+					"progress_ms", currentMeta.ProgressMs,
 				)
 				w.sendSynchronizedState(client)
 				w.handler.OnStreamStart(w.cfg.ID, currentMeta)
@@ -618,10 +645,15 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 
 			case <-client.StreamClear:
 				ing.logger.Debug("Sendspin stream clear received (flushing buffer)", "player_id", w.cfg.ID)
-				w.statsMu.Lock()
-				w.currentMeta.ProgressMs = 0
-				w.currentMeta.ProgressUpdated = time.Time{}
-				w.statsMu.Unlock()
+				// Drain any remaining stale chunks in client.AudioChunks channel
+				for {
+					select {
+					case <-client.AudioChunks:
+					default:
+						goto clearDrained
+					}
+				}
+			clearDrained:
 				w.handler.OnStreamClear(w.cfg.ID)
 
 			case stateMsg := <-client.ServerState:
@@ -739,17 +771,18 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 }
 
 func resolvePlayAt(w *playerWorker, serverTS int64) time.Time {
-	now := time.Now()
 	if serverTS <= 0 {
-		return now
+		return time.Now()
 	}
-	w.statsMu.Lock()
-	defer w.statsMu.Unlock()
-	if !w.clockSynced {
-		w.clockOffsetUs = now.UnixMicro() - serverTS
-		w.clockSynced = true
+	w.statsMu.RLock()
+	cs := w.clockSync
+	w.statsMu.RUnlock()
+
+	if cs != nil {
+		return cs.ServerToLocalTime(serverTS)
 	}
-	return time.UnixMicro(serverTS + w.clockOffsetUs)
+
+	return time.Now()
 }
 
 func (ing *Ingress) clearServerAddr(current string) {

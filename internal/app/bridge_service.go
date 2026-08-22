@@ -263,6 +263,9 @@ func (s *BridgeService) OnStreamStart(playerID string, meta domain.StreamMetadat
 
 				startProgSec := float64(meta.ProgressMs) / 1000.0
 				call.streamStartProgressSec = startProgSec
+				if call.rtpSession != nil {
+					call.rtpSession.ClearBuffer()
+				}
 				call.mu.Unlock()
 
 				s.logger.Info("Reusing active SIP call session for stream (next track / transition)",

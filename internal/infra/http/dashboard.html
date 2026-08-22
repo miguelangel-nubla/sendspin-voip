@@ -3,53 +3,44 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sendspin VoIP Studio — Multi-Track Audio Engine</title>
+  <title>Sendspin VoIP Studio</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%2300f0ff' d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-canvas: #05070c;
-      --bg-surface: rgba(12, 17, 29, 0.88);
-      --bg-surface-elevated: #151d30;
-      --bg-track: #080c15;
-      --bg-track-lane: #0d1322;
-      --border-subtle: rgba(255, 255, 255, 0.07);
+      --bg-canvas: #07090e;
+      --bg-surface: rgba(13, 18, 30, 0.85);
+      --bg-card: #0f172a;
+      --bg-card-subtle: #141e33;
+      --border-subtle: rgba(255, 255, 255, 0.08);
       --border-bright: rgba(255, 255, 255, 0.16);
       --border-glow: rgba(0, 240, 255, 0.35);
       --text-primary: #f8fafc;
       --text-secondary: #94a3b8;
       --text-muted: #64748b;
       --accent-cyan: #00f0ff;
-      --accent-cyan-glow: rgba(0, 240, 255, 0.4);
+      --accent-cyan-glow: rgba(0, 240, 255, 0.35);
       --accent-purple: #a855f7;
-      --accent-purple-glow: rgba(168, 85, 247, 0.35);
       --accent-emerald: #10b981;
-      --accent-emerald-glow: rgba(16, 185, 129, 0.35);
       --accent-amber: #f59e0b;
       --accent-rose: #f43f5e;
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       --font-mono: 'JetBrains Mono', monospace;
       --radius-sm: 6px;
       --radius-md: 10px;
-      --radius-lg: 16px;
-      --radius-xl: 20px;
-      --shadow-glass: 0 20px 50px -15px rgba(0, 0, 0, 0.85), 0 0 1px 1px rgba(255, 255, 255, 0.08) inset;
+      --radius-lg: 14px;
+      --shadow-glass: 0 16px 40px -10px rgba(0, 0, 0, 0.7), 0 0 1px 1px rgba(255, 255, 255, 0.06) inset;
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       background-color: var(--bg-canvas);
-      background-image: 
-        radial-gradient(at 0% 0%, rgba(0, 240, 255, 0.07) 0px, transparent 50%),
-        radial-gradient(at 100% 0%, rgba(168, 85, 247, 0.07) 0px, transparent 50%),
-        radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.05) 0px, transparent 50%);
+      background-image:
+        radial-gradient(at 0% 0%, rgba(0, 240, 255, 0.06) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(168, 85, 247, 0.06) 0px, transparent 50%);
       background-attachment: fixed;
       color: var(--text-primary);
       font-family: var(--font-sans);
@@ -57,24 +48,21 @@
       display: flex;
       flex-direction: column;
       -webkit-font-smoothing: antialiased;
-      overflow-x: hidden;
     }
 
-    /* Top Studio Header */
     header {
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-      background: rgba(7, 10, 18, 0.92);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      background: rgba(8, 11, 19, 0.9);
       border-bottom: 1px solid var(--border-subtle);
       position: sticky;
       top: 0;
       z-index: 100;
       padding: 0 2rem;
-      height: 70px;
+      height: 64px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     }
 
     .brand {
@@ -85,24 +73,20 @@
     }
 
     .brand-icon {
-      width: 40px;
-      height: 40px;
+      width: 36px;
+      height: 36px;
       border-radius: var(--radius-md);
       background: linear-gradient(135deg, #00f0ff, #a855f7);
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 0 25px var(--accent-cyan-glow);
+      box-shadow: 0 0 20px var(--accent-cyan-glow);
     }
 
-    .brand-icon svg {
-      width: 22px;
-      height: 22px;
-      fill: #06080e;
-    }
+    .brand-icon svg { width: 20px; height: 20px; fill: #06080e; }
 
     .brand-title {
-      font-size: 1.15rem;
+      font-size: 1.1rem;
       font-weight: 800;
       letter-spacing: -0.02em;
       background: linear-gradient(90deg, #ffffff 0%, #cbd5e1 100%);
@@ -113,67 +97,52 @@
     .brand-badge {
       font-size: 0.65rem;
       font-family: var(--font-mono);
-      padding: 3px 8px;
+      padding: 2px 7px;
       border-radius: 4px;
       background: rgba(0, 240, 255, 0.12);
       color: var(--accent-cyan);
       border: 1px solid rgba(0, 240, 255, 0.25);
       font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
     }
 
     .nav-controls {
       display: flex;
       align-items: center;
-      gap: 12px;
-    }
-
-    .search-box {
-      position: relative;
+      gap: 10px;
     }
 
     .search-box input {
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md);
-      padding: 8px 12px 8px 34px;
+      padding: 7px 12px;
       color: var(--text-primary);
       font-family: var(--font-sans);
-      font-size: 0.85rem;
-      width: 220px;
-      transition: all 0.25s ease;
+      font-size: 0.8rem;
+      width: 200px;
+      transition: all 0.2s ease;
     }
 
     .search-box input:focus {
       outline: none;
       border-color: var(--accent-cyan);
       background: rgba(255, 255, 255, 0.08);
-      box-shadow: 0 0 16px var(--accent-cyan-glow);
-      width: 260px;
-    }
-
-    .search-icon {
-      position: absolute;
-      left: 10px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--text-muted);
-      pointer-events: none;
+      box-shadow: 0 0 12px var(--accent-cyan-glow);
+      width: 240px;
     }
 
     .btn {
       background: rgba(255, 255, 255, 0.06);
       border: 1px solid var(--border-subtle);
       color: var(--text-primary);
-      padding: 8px 14px;
+      padding: 7px 12px;
       border-radius: var(--radius-md);
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       font-weight: 600;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       transition: all 0.2s ease;
       font-family: var(--font-sans);
     }
@@ -183,271 +152,231 @@
       border-color: rgba(255, 255, 255, 0.2);
     }
 
-    .btn-primary {
-      background: linear-gradient(135deg, rgba(0, 240, 255, 0.18), rgba(168, 85, 247, 0.18));
-      border-color: rgba(0, 240, 255, 0.35);
-      color: var(--accent-cyan);
-    }
-
-    .btn-primary:hover {
-      background: linear-gradient(135deg, rgba(0, 240, 255, 0.28), rgba(168, 85, 247, 0.28));
-      box-shadow: 0 0 15px var(--accent-cyan-glow);
-    }
-
-    /* Main Studio Canvas */
     main {
       flex: 1;
-      padding: 1.75rem 2rem 3rem 2rem;
-      max-width: 1680px;
+      padding: 1.5rem 2rem 3rem 2rem;
+      max-width: 1600px;
       margin: 0 auto;
       width: 100%;
     }
 
-    /* Studio Status Header Cards */
     .studio-summary {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 16px;
-      margin-bottom: 1.75rem;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 1.5rem;
     }
 
     .stat-card {
       background: var(--bg-surface);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
       border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
-      padding: 1.2rem 1.4rem;
+      border-radius: var(--radius-md);
+      padding: 1rem 1.2rem;
       box-shadow: var(--shadow-glass);
       display: flex;
       flex-direction: column;
-      gap: 4px;
-      position: relative;
-      overflow: hidden;
-      transition: border-color 0.2s ease;
-    }
-
-    .stat-card:hover {
-      border-color: var(--border-bright);
-    }
-
-    .stat-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 2px;
-      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
-      opacity: 0.6;
+      gap: 2px;
     }
 
     .stat-title {
-      font-size: 0.7rem;
+      font-size: 0.68rem;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.05em;
       color: var(--text-secondary);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
     }
 
-    .stat-number {
-      font-size: 1.55rem;
+    .stat-value {
+      font-size: 1.35rem;
       font-weight: 800;
       font-family: var(--font-mono);
       color: #fff;
     }
 
-    .stat-sub {
-      font-size: 0.75rem;
+    .stat-meta {
+      font-size: 0.72rem;
       color: var(--text-muted);
     }
 
-    /* Stream DAW Card */
-    .stream-daw-card {
+    .streams-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .stream-card {
       background: var(--bg-surface);
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-xl);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem 1.5rem;
       box-shadow: var(--shadow-glass);
-      margin-bottom: 24px;
-      overflow: hidden;
-      transition: all 0.25s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
     }
 
-    .stream-daw-card:hover {
-      border-color: rgba(255, 255, 255, 0.18);
+    .stream-card.is-active {
+      border-color: rgba(0, 240, 255, 0.3);
+      box-shadow: 0 16px 40px -10px rgba(0, 240, 255, 0.1), 0 0 1px 1px rgba(0, 240, 255, 0.2) inset;
     }
 
-    .stream-daw-card.is-active {
-      border-color: rgba(0, 240, 255, 0.4);
-      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.85), 0 0 25px rgba(0, 240, 255, 0.12);
-    }
-
-    /* Player Transport Bar */
-    .player-transport-bar {
-      padding: 1rem 1.6rem;
-      background: rgba(255, 255, 255, 0.02);
-      border-bottom: 1px solid var(--border-subtle);
+    .stream-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: 16px;
+      gap: 12px;
     }
 
-    .player-info-block {
+    .player-title-row {
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
-    .player-badge-icon {
-      width: 44px;
-      height: 44px;
-      border-radius: var(--radius-md);
-      background: linear-gradient(135deg, rgba(0, 240, 255, 0.16), rgba(168, 85, 247, 0.16));
-      border: 1px solid rgba(0, 240, 255, 0.35);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.35rem;
-    }
-
-    .player-title-text {
-      font-size: 1.15rem;
-      font-weight: 700;
+    .player-name {
+      font-size: 1.1rem;
+      font-weight: 800;
       color: #fff;
     }
 
-    .player-sub-meta {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 8px;
-      font-size: 0.75rem;
+    .player-target {
       font-family: var(--font-mono);
-      color: var(--text-muted);
-      margin-top: 2px;
+      font-size: 0.78rem;
+      color: var(--accent-cyan);
+      background: rgba(0, 240, 255, 0.08);
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(0, 240, 255, 0.2);
     }
 
-    /* Stereo VU Level Meter */
-    .vu-meter-cluster {
+    .pill-tag {
+      font-size: 0.65rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.04em;
+    }
+
+    .tag-idle { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); border: 1px solid var(--border-subtle); }
+    .tag-live { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); }
+    .tag-dialing { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); }
+    .tag-linger { background: rgba(168, 85, 247, 0.15); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.35); }
+    .tag-passthrough { background: rgba(0, 240, 255, 0.15); color: #67e8f9; border: 1px solid rgba(0, 240, 255, 0.35); }
+
+    /* Track Metadata Banner */
+    .track-meta-banner {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 0.9rem 1.2rem;
       display: flex;
       align-items: center;
-      gap: 8px;
-      background: rgba(0, 0, 0, 0.45);
-      padding: 6px 12px;
-      border-radius: var(--radius-md);
-      border: 1px solid var(--border-subtle);
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
     }
 
-    .vu-meter-bar-container {
+    .track-info {
       display: flex;
       flex-direction: column;
       gap: 3px;
     }
 
-    .vu-channel {
-      display: flex;
-      align-items: center;
-      gap: 4px;
+    .track-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #fff;
     }
 
-    .vu-channel-label {
+    .track-artist-album {
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+    }
+
+    .timecode-pill {
       font-family: var(--font-mono);
-      font-size: 0.65rem;
-      color: var(--text-muted);
-      width: 10px;
-    }
-
-    .vu-led-track {
-      width: 80px;
-      height: 6px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 3px;
-      overflow: hidden;
-      position: relative;
-    }
-
-    .vu-led-fill {
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #10b981 0%, #10b981 60%, #f59e0b 80%, #f43f5e 100%);
-      transition: width 0.08s ease;
-      border-radius: 3px;
-    }
-
-    .timecode-display {
-      font-family: var(--font-mono);
-      font-size: 1.2rem;
+      font-size: 0.85rem;
       font-weight: 700;
       color: var(--accent-cyan);
-      background: rgba(0, 0, 0, 0.55);
-      padding: 5px 14px;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border-subtle);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      letter-spacing: 0.05em;
+      background: rgba(0, 240, 255, 0.08);
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(0, 240, 255, 0.2);
     }
 
-    .dot-pulse {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--accent-emerald);
-      box-shadow: 0 0 10px var(--accent-emerald);
-      animation: pulse 1.8s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.25; transform: scale(0.8); }
-    }
-
-    /* DAW Timeline Container */
-    .daw-timeline-wrapper {
-      padding: 1.25rem 1.6rem;
-      background: var(--bg-track);
+    /* Track Progress Visualizer */
+    .progress-container {
       display: flex;
       flex-direction: column;
-      position: relative;
+      gap: 6px;
     }
 
-    /* Timeline Canvas Viewport (3-Track Streamlined NLE) */
-    .timeline-viewport-container {
+    .progress-track-shell {
       position: relative;
-      background: #080c14;
-      border-radius: var(--radius-md);
-      border: 1px solid var(--border-subtle);
+      height: 10px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 5px;
       overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.08);
     }
 
-    .timeline-canvas {
-      display: block;
-      width: 100%;
-      height: 204px;
+    .progress-bar-played {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899);
+      border-radius: 5px;
+      transition: width 0.3s linear;
     }
 
-    /* Clean End-to-End Pipeline Specs Bar */
-    .pipeline-summary-bar {
-      padding: 0.85rem 1.6rem;
-      background: rgba(0, 0, 0, 0.4);
-      border-top: 1px solid var(--border-subtle);
+    .progress-bar-buffer {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      background: rgba(0, 240, 255, 0.25);
+      border-radius: 5px;
+      transition: width 0.3s linear;
+    }
+
+    .progress-labels {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+
+    /* Pipeline Flow Bar */
+    .pipeline-bar {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 0.8rem 1.2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .pipeline-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: 16px;
-      font-size: 0.8rem;
+      gap: 10px;
     }
 
-    .pipeline-path-flow {
+    .pipeline-flow-steps {
       display: flex;
       align-items: center;
       flex-wrap: wrap;
@@ -456,267 +385,174 @@
       font-size: 0.75rem;
     }
 
-    .flow-arrow {
-      color: var(--text-muted);
-      font-size: 0.75rem;
-    }
-
-    .pill-tag {
-      font-family: var(--font-mono);
-      font-size: 0.7rem;
-      padding: 3px 8px;
-      border-radius: 4px;
+    .pipeline-step {
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid var(--border-subtle);
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: var(--text-primary);
+    }
+
+    .step-source { border-color: rgba(0, 240, 255, 0.3); color: #67e8f9; }
+    .step-target { border-color: rgba(168, 85, 247, 0.3); color: #d8b4fe; }
+
+    .telemetry-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
       color: var(--text-secondary);
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 6px;
     }
 
-    .pill-tag.active-codec {
-      background: rgba(0, 240, 255, 0.12);
-      border-color: rgba(0, 240, 255, 0.3);
-      color: var(--accent-cyan);
-      font-weight: 700;
-    }
-
-    .pill-tag.mode-live {
-      background: rgba(16, 185, 129, 0.12);
-      border-color: rgba(16, 185, 129, 0.3);
-      color: var(--accent-emerald);
-      font-weight: 700;
-    }
-
-    .pill-tag.mode-announcement {
-      background: rgba(245, 158, 11, 0.12);
-      border-color: rgba(245, 158, 11, 0.3);
-      color: var(--accent-amber);
-      font-weight: 700;
-    }
-
-    .pill-tag.mode-passthrough {
-      background: rgba(168, 85, 247, 0.12);
-      border-color: rgba(168, 85, 247, 0.3);
-      color: var(--accent-purple);
-      font-weight: 700;
-    }
-
-    /* Modal Styles */
     .modal-backdrop {
       position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.85);
-      backdrop-filter: blur(14px);
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(12px);
+      z-index: 1000;
       display: none;
       align-items: center;
       justify-content: center;
-      z-index: 200;
       padding: 1.5rem;
     }
 
-    .modal-backdrop.open {
-      display: flex;
-    }
+    .modal-backdrop.open { display: flex; }
 
-    .modal-card {
-      background: #0d121f;
-      border: 1px solid var(--border-subtle);
+    .modal-box {
+      background: #0f172a;
+      border: 1px solid var(--border-bright);
       border-radius: var(--radius-lg);
-      max-width: 900px;
       width: 100%;
-      box-shadow: 0 25px 80px rgba(0, 0, 0, 0.95);
+      max-width: 700px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.9);
       overflow: hidden;
     }
 
     .modal-header {
-      padding: 1.25rem 1.6rem;
+      padding: 1rem 1.5rem;
       border-bottom: 1px solid var(--border-subtle);
       display: flex;
-      align-items: center;
       justify-content: space-between;
-    }
-
-    .modal-title {
-      font-size: 1.1rem;
-      font-weight: 700;
+      align-items: center;
     }
 
     .modal-body {
-      padding: 1.6rem;
-      max-height: 70vh;
+      padding: 1.5rem;
       overflow-y: auto;
-    }
-
-    .codec-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.85rem;
-    }
-
-    .codec-table th {
-      text-align: left;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border-subtle);
-      color: var(--text-secondary);
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .codec-table td {
-      padding: 12px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-      font-family: var(--font-mono);
-    }
-
-    .empty-state {
-      text-align: center;
-      padding: 5rem 2rem;
-      background: var(--bg-surface);
-      border-radius: var(--radius-xl);
-      border: 1px dashed var(--border-subtle);
-    }
-
-    .json-code-box {
-      background: #05070c;
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
-      padding: 1rem;
       font-family: var(--font-mono);
       font-size: 0.8rem;
-      color: #a5f3fc;
-      max-height: 400px;
-      overflow: auto;
-      white-space: pre-wrap;
+    }
+
+    table.codec-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.75rem;
+    }
+
+    table.codec-table th, table.codec-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    table.codec-table th {
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      font-size: 0.65rem;
     }
   </style>
 </head>
 <body>
-
-  <!-- Top Studio Header -->
   <header>
-    <a href="/" class="brand">
+    <div class="brand">
       <div class="brand-icon">
-        <svg viewBox="0 0 24 24">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/>
-        </svg>
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/></svg>
       </div>
       <div>
         <div class="brand-title">Sendspin VoIP Studio</div>
       </div>
-      <span class="brand-badge">Multi-Track NLE Engine</span>
-    </a>
+      <span class="brand-badge">LIVE ENGINE</span>
+    </div>
 
     <div class="nav-controls">
       <div class="search-box">
-        <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
-        <input type="text" id="filterInput" placeholder="Filter virtual players..." oninput="onFilterChange()">
+        <input type="text" id="filterInput" placeholder="Filter players..." oninput="onFilterChange()">
       </div>
-
-      <button class="btn" onclick="openCodecsModal()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-        </svg>
-        Codecs & SDP
-      </button>
-
-      <button class="btn btn-primary" id="refreshBtn" onclick="fetchData()">
-        <span class="dot-pulse" style="width: 6px; height: 6px;"></span>
-        <span id="refreshLabel">Live Studio (SSE)</span>
-      </button>
+      <button class="btn" onclick="openCodecsModal()">Codecs</button>
+      <span class="pill-tag tag-live" id="refreshLabel">SSE Live</span>
     </div>
   </header>
 
-  <!-- Studio Main Canvas -->
   <main>
-    <!-- System Telemetry Stats Banner -->
-    <div class="studio-summary" id="systemBanner">
+    <div class="studio-summary">
       <div class="stat-card">
-        <div class="stat-title">
-          <span>Active Pipelines</span>
-          <span class="dot-pulse"></span>
-        </div>
-        <div class="stat-number" id="statActiveStreams">0</div>
-        <div class="stat-sub" id="statTotalStreams">0 players configured</div>
+        <span class="stat-title">Active Streams</span>
+        <span class="stat-value" id="statActiveStreams">0</span>
+        <span class="stat-meta" id="statTotalStreams">0 players configured</span>
       </div>
-
       <div class="stat-card">
-        <div class="stat-title">
-          <span>SIP PBX Trunk</span>
-          <span style="color: var(--accent-emerald);">SIP 2.0</span>
-        </div>
-        <div class="stat-number" style="font-size: 1.15rem;" id="statSIPServer">—</div>
-        <div class="stat-sub" id="statSIPRegistered">Registered Trunk</div>
+        <span class="stat-title">SIP Connection</span>
+        <span class="stat-value" id="statSIPServer" style="font-size: 1.1rem; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">Connected</span>
+        <span class="stat-meta" id="statSIPRegistered">PBX Trunk</span>
       </div>
-
       <div class="stat-card">
-        <div class="stat-title">
-          <span>Total Packets Routed</span>
-          <span style="color: var(--accent-cyan);">RFC 3550</span>
-        </div>
-        <div class="stat-number" id="statTotalPackets">0</div>
-        <div class="stat-sub" id="statTotalBytes">0 B delivered</div>
+        <span class="stat-title">RTP Delivered</span>
+        <span class="stat-value" id="statTotalPackets">0</span>
+        <span class="stat-meta" id="statTotalBytes">0 B delivered</span>
       </div>
-
       <div class="stat-card">
-        <div class="stat-title">
-          <span>Runtime Core Health</span>
-          <span style="color: var(--accent-purple);">Go Core</span>
-        </div>
-        <div class="stat-number" style="font-size: 1.15rem;" id="statUptime">—</div>
-        <div class="stat-sub" id="statMemory">— MB Alloc</div>
+        <span class="stat-title">System Uptime</span>
+        <span class="stat-value" id="statUptime">0s</span>
+        <span class="stat-meta" id="statMemory">0 MB Alloc</span>
       </div>
     </div>
 
-    <!-- Multi-Track Streams Stack -->
-    <div class="streams-container" id="streamsContainer">
-      <div class="empty-state" style="padding: 24px; text-align: center;">
-        <div style="font-size: 0.85rem; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 8px;">
-          <span class="dot-pulse"></span>
-          <span>Connecting to virtual Sendspin players...</span>
-        </div>
-      </div>
+    <div class="streams-grid" id="streamsContainer">
+      <!-- Player cards injected dynamically -->
     </div>
   </main>
 
-  <!-- Codecs Modal -->
   <div class="modal-backdrop" id="codecsModal" onclick="closeCodecsModal(event)">
-    <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-box" onclick="event.stopPropagation()">
       <div class="modal-header">
-        <div class="modal-title">Supported VoIP Audio Codecs & SDP Specifications</div>
-        <button class="btn" onclick="closeCodecsModal()">✕</button>
+        <span style="font-weight: 700; color: #fff;">Supported Audio Codecs</span>
+        <button class="btn" onclick="closeCodecsModal()">Close</button>
       </div>
       <div class="modal-body">
         <table class="codec-table">
           <thead>
             <tr>
               <th>Codec</th>
-              <th>SDP Specification</th>
-              <th>RTP Clock</th>
-              <th>Sample Rate</th>
-              <th>Channels</th>
-              <th>Payload Type</th>
+              <th>SDP Name</th>
+              <th>Clock</th>
+              <th>Rate</th>
+              <th>Ch</th>
+              <th>PT</th>
               <th>Description</th>
             </tr>
           </thead>
-          <tbody id="codecTableBody">
-            <!-- Populated dynamically -->
-          </tbody>
+          <tbody id="codecTableBody"></tbody>
         </table>
       </div>
     </div>
   </div>
 
-  <!-- Raw JSON Inspector Modal -->
   <div class="modal-backdrop" id="jsonModal" onclick="closeJsonModal(event)">
-    <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-box" onclick="event.stopPropagation()">
       <div class="modal-header">
-        <div class="modal-title" id="jsonModalTitle">Stream Telemetry JSON</div>
-        <button class="btn" onclick="closeJsonModal()">✕</button>
+        <span style="font-weight: 700; color: #fff;" id="jsonModalTitle">Telemetry Data</span>
+        <button class="btn" onclick="closeJsonModal()">Close</button>
       </div>
       <div class="modal-body">
-        <div class="json-code-box" id="jsonModalCode"></div>
+        <pre id="jsonModalCode" style="color: #67e8f9; font-size: 0.75rem; overflow-x: auto;"></pre>
       </div>
     </div>
   </div>
@@ -731,15 +567,18 @@
         const evSource = new EventSource('/api/events');
         evSource.onmessage = function(e) {
           try {
-            const data = JSON.parse(e.data);
-            globalStreams = data;
+            globalStreams = JSON.parse(e.data);
             renderStreams();
           } catch(err) {
             console.error('SSE parse error', err);
           }
         };
         evSource.onerror = function() {
-          document.getElementById('refreshLabel').textContent = 'Polling';
+          const lbl = document.getElementById('refreshLabel');
+          if (lbl) {
+            lbl.textContent = 'Polling';
+            lbl.className = 'pill-tag tag-dialing';
+          }
         };
       }
     }
@@ -769,19 +608,15 @@
       document.getElementById('statTotalStreams').textContent = `${globalInfo.total_streams || 0} players configured`;
 
       const sip = globalInfo.sip || {};
-      const sipServerElem = document.getElementById('statSIPServer');
-      sipServerElem.textContent = sip.server || (sip.mode === 'direct' ? 'Direct P2P' : 'Connected');
-      document.getElementById('statSIPRegistered').textContent = sip.registered ? 'Registered PBX Trunk' : (sip.mode === 'direct' ? 'P2P Mode' : 'Connecting...');
+      document.getElementById('statSIPServer').textContent = sip.server || (sip.mode === 'direct' ? 'Direct P2P' : 'Connected');
+      document.getElementById('statSIPRegistered').textContent = sip.registered ? 'Registered PBX Trunk' : (sip.mode === 'direct' ? 'P2P Direct' : 'Connecting...');
 
       const uptimeSec = Math.floor(globalInfo.uptime_sec || 0);
-      let uptimeStr = '';
-      if (uptimeSec < 60) {
-        uptimeStr = `${uptimeSec}s`;
-      } else {
-        const uptimeMin = Math.floor(uptimeSec / 60);
-        const uptimeHours = Math.floor(uptimeMin / 60);
-        uptimeStr = `${uptimeMin % 60}m`;
-        if (uptimeHours > 0) uptimeStr = `${uptimeHours}h ` + uptimeStr;
+      let uptimeStr = `${uptimeSec}s`;
+      if (uptimeSec >= 60) {
+        const m = Math.floor(uptimeSec / 60);
+        const h = Math.floor(m / 60);
+        uptimeStr = h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
       }
       document.getElementById('statUptime').textContent = uptimeStr;
 
@@ -803,10 +638,8 @@
           }
         }
       }
-      const totalPacketsElem = document.getElementById('statTotalPackets');
-      if (totalPacketsElem) totalPacketsElem.textContent = totalPackets.toLocaleString();
-      const totalBytesElem = document.getElementById('statTotalBytes');
-      if (totalBytesElem) totalBytesElem.textContent = `${formatBytes(totalBytes)} delivered`;
+      document.getElementById('statTotalPackets').textContent = totalPackets.toLocaleString();
+      document.getElementById('statTotalBytes').textContent = `${formatBytes(totalBytes)} delivered`;
     }
 
     function onFilterChange() {
@@ -826,19 +659,11 @@
       });
 
       if (filteredKeys.length === 0) {
-        container.innerHTML = `
-          <div class="empty-state" style="padding: 24px; text-align: center;">
-            <div style="font-size: 0.85rem; color: var(--text-muted);">${filterQuery ? 'No virtual players match your filter.' : 'No virtual Sendspin players configured or active.'}</div>
-          </div>`;
+        container.innerHTML = `<div style="padding: 24px; text-align: center; color: var(--text-muted);">${filterQuery ? 'No matching players.' : 'No players configured.'}</div>`;
         return;
       }
 
-      // Clear empty state message if it was present
-      const emptyStateElem = container.querySelector('.empty-state');
-      if (emptyStateElem) {
-        emptyStateElem.remove();
-      }
-
+      // Render cards
       for (const id of filteredKeys) {
         const st = globalStreams[id];
         let card = document.getElementById(`card-${id}`);
@@ -848,13 +673,13 @@
           card = wrapper.firstElementChild;
           container.appendChild(card);
         }
-        updateCardHeaderAndFooter(id, st);
+        updateCardContent(id, st);
       }
 
-      // Remove obsolete cards
-      for (const existingCard of container.querySelectorAll('.stream-daw-card')) {
-        const cId = existingCard.id.replace('card-', '');
-        if (!filteredKeys.includes(cId)) existingCard.remove();
+      // Cleanup removed cards
+      for (const existing of container.querySelectorAll('.stream-card')) {
+        const cId = existing.id.replace('card-', '');
+        if (!filteredKeys.includes(cId)) existing.remove();
       }
 
       updateGlobalPacketCounters();
@@ -862,572 +687,151 @@
 
     function createCardHTML(id, st) {
       return `
-      <div class="stream-daw-card" id="card-${id}">
-        <!-- Player Transport Header Bar (Clean & Focused) -->
-        <div class="player-transport-bar">
-          <div class="player-info-block">
-            <div>
-              <div class="player-title-text" id="title-${id}">${escapeHTML(st.name || id)}</div>
-              <div class="player-sub-meta" id="submeta-${id}">
-                <!-- Populated dynamically: Group & Mode status -->
-              </div>
-            </div>
+      <div class="stream-card" id="card-${id}">
+        <div class="stream-header">
+          <div class="player-title-row">
+            <span class="player-name" id="name-${id}">${escapeHTML(st.name || id)}</span>
+            <span class="player-target" id="target-${id}">...</span>
+            <span class="pill-tag tag-idle" id="badge-${id}">IDLE</span>
+            <span id="group-badge-${id}"></span>
           </div>
-
-          <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
-            <!-- Stereo VU Meter -->
-            <div class="vu-meter-cluster" id="vu-${id}">
-              <div class="vu-meter-bar-container">
-                <div class="vu-channel">
-                  <span class="vu-channel-label">L</span>
-                  <div class="vu-led-track"><div class="vu-led-fill" id="vu-l-${id}"></div></div>
-                </div>
-                <div class="vu-channel">
-                  <span class="vu-channel-label">R</span>
-                  <div class="vu-led-track"><div class="vu-led-fill" id="vu-r-${id}"></div></div>
-                </div>
-              </div>
-              <span style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary);" id="vol-db-${id}">0 dB</span>
-            </div>
-
-            <!-- Timecode -->
-            <div class="timecode-display" id="timecode-${id}">
-              <span class="dot-pulse"></span>
-              <span class="tc-val">00:00.00</span>
-            </div>
-
-            <span class="pill-tag" id="badge-${id}">IDLE</span>
-
-            <button class="btn" style="padding: 5px 10px; font-size: 0.75rem;" onclick="inspectStreamJson('${id}')">
-              JSON
-            </button>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="timecode-pill" id="tc-${id}">00:00</span>
+            <span class="pill-tag tag-idle" id="vol-${id}">100% (0 dB)</span>
+            <button class="btn" onclick="inspectStreamJson('${id}')">JSON</button>
           </div>
         </div>
 
-        <!-- Real-Time 3-Track Timeline NLE Canvas Viewport -->
-        <div class="daw-timeline-wrapper">
-          <div class="timeline-viewport-container">
-            <canvas class="timeline-canvas" id="canvas-${id}"></canvas>
+        <div class="track-meta-banner" id="banner-${id}">
+          <div class="track-info">
+            <span class="track-title" id="track-title-${id}">Idle</span>
+            <span class="track-artist-album" id="track-artist-${id}">Ready for stream</span>
+          </div>
+          <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);" id="track-timing-${id}">--:-- / --:--</div>
+        </div>
+
+        <div class="progress-container">
+          <div class="progress-track-shell">
+            <div class="progress-bar-buffer" id="pbuf-${id}" style="width: 0%;"></div>
+            <div class="progress-bar-played" id="pplay-${id}" style="width: 0%;"></div>
+          </div>
+          <div class="progress-labels">
+            <span id="pos-label-${id}">00:00</span>
+            <span id="buf-label-${id}" style="color: var(--accent-cyan);">Buffer: 0ms</span>
+            <span id="dur-label-${id}">00:00</span>
           </div>
         </div>
 
-        <!-- Clean Source ➔ Output Transcode Specs Bar -->
-        <div class="pipeline-summary-bar" id="pipeline-bar-${id}">
-          <div class="pipeline-path-flow" id="pipeline-flow-${id}" style="width: 100%;">
-            <!-- Populated dynamically -->
+        <div class="pipeline-bar">
+          <div class="pipeline-row">
+            <div class="pipeline-flow-steps" id="flow-${id}"></div>
+            <div style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-secondary);" id="sdp-${id}"></div>
           </div>
+          <div class="telemetry-row" id="telem-${id}"></div>
         </div>
       </div>`;
     }
 
-    function updateCardHeaderAndFooter(id, st) {
-      const isPlaying = st.state === 'playing' || st.state === 'active';
-      const isDialing = st.state === 'dialing';
+    function updateCardContent(id, st) {
       const card = document.getElementById(`card-${id}`);
       if (!card) return;
 
-      card.className = `stream-daw-card ${isPlaying ? 'is-active' : ''}`;
-      
+      const isPlaying = st.state === 'playing' || st.state === 'active';
+      const isDialing = st.state === 'dialing';
+      const isLingering = st.state === 'lingering';
+
+      card.className = `stream-card ${isPlaying ? 'is-active' : ''}`;
+
       const prod = (st.producers && st.producers.length > 0) ? st.producers[0] : {};
       const cons = (st.consumers && st.consumers.length > 0) ? st.consumers[0] : {};
       const path = st.audio_path || {};
-      const activeCodec = (cons.active_codec || cons.config_codec || 'g722').toUpperCase();
-      const isPassthrough = path.passthrough || (activeCodec === 'OPUS' && (path.volume_percent >= 100));
 
-
-      const title = prod.title || prod.track || '';
-      const artist = prod.artist || '';
-      const album = prod.album || '';
-      let nowPlayingHTML = '';
-      if (title || artist) {
-        nowPlayingHTML = `
-          <div style="margin-top: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-            <span style="font-weight: 700; color: #fff; font-size: 0.9rem;">🎵 ${escapeHTML(artist ? `${artist} — ${title}` : title)}</span>
-            ${album ? `<span style="color: var(--text-secondary); font-size: 0.75rem;">💽 ${escapeHTML(album)}</span>` : ''}
-          </div>
-        `;
-      }
-
-      // Header Info
-      document.getElementById(`title-${id}`).textContent = st.name || id;
-      document.getElementById(`submeta-${id}`).innerHTML = `
-        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-          ${st.is_grouped ? '<span class="pill-tag mode-live">SYNC GROUP</span>' : ''}
-          <span class="pill-tag mode-live">LIVE SYNC</span>
-        </div>
-        ${nowPlayingHTML}
-      `;
-
+      document.getElementById(`name-${id}`).textContent = st.name || id;
+      document.getElementById(`target-${id}`).textContent = cons.url || 'sip:target';
 
       const badge = document.getElementById(`badge-${id}`);
-      badge.textContent = isPlaying ? 'STREAMING LIVE' : (isDialing ? 'SIP DIALING' : (st.state ? st.state.toUpperCase() : 'IDLE'));
-      badge.className = `pill-tag ${isPlaying ? 'mode-live' : (isDialing ? 'mode-announcement' : '')}`;
-
-      const tcElem = document.getElementById(`timecode-${id}`);
-      const tcVal = tcElem.querySelector('.tc-val');
-      const trackDuration = prod.track_duration_sec || 0;
-      const currentPosition = (prod.track_progress_sec != null && prod.track_progress_sec > 0) ? prod.track_progress_sec : (cons.duration_sec || 0);
-      if (trackDuration > 0) {
-        tcVal.textContent = `${formatDuration(currentPosition)} / ${formatDuration(trackDuration)}`;
+      if (isPlaying) {
+        badge.textContent = 'STREAMING LIVE';
+        badge.className = 'pill-tag tag-live';
+      } else if (isDialing) {
+        badge.textContent = 'SIP DIALING';
+        badge.className = 'pill-tag tag-dialing';
+      } else if (isLingering) {
+        badge.textContent = 'LINGERING';
+        badge.className = 'pill-tag tag-linger';
       } else {
-        tcVal.textContent = formatDuration(currentPosition);
+        badge.textContent = (st.state || 'IDLE').toUpperCase();
+        badge.className = 'pill-tag tag-idle';
       }
 
-      // Volume & VU simulation
+      const grpBadge = document.getElementById(`group-badge-${id}`);
+      grpBadge.innerHTML = st.is_grouped ? '<span class="pill-tag tag-live">SYNC GROUP</span>' : '';
+
       const vol = (path.volume_percent != null ? path.volume_percent : st.volume) || 100;
-      const volDbStr = vol >= 100 ? '0 dB' : (vol <= 0 ? 'Mute' : `${((vol/100)*60 - 60).toFixed(0)} dB`);
-      document.getElementById(`vol-db-${id}`).textContent = `${vol}% (${volDbStr})`;
+      const volDbStr = vol >= 100 ? '0 dB' : (vol <= 0 ? 'Muted' : `${((vol/100)*60 - 60).toFixed(0)} dB`);
+      document.getElementById(`vol-${id}`).textContent = st.muted ? 'Muted' : `${vol}% (${volDbStr})`;
 
-      const vuL = document.getElementById(`vu-l-${id}`);
-      const vuR = document.getElementById(`vu-r-${id}`);
-      if (isPlaying && !st.muted) {
-        const baseLevel = (vol / 100) * 85;
-        const jitterL = Math.min(100, Math.max(10, baseLevel + (Math.sin(Date.now() / 150) * 12)));
-        const jitterR = Math.min(100, Math.max(10, baseLevel + (Math.cos(Date.now() / 140) * 12)));
-        vuL.style.width = `${jitterL}%`;
-        vuR.style.width = `${jitterR}%`;
-      } else {
-        vuL.style.width = '0%';
-        vuR.style.width = '0%';
-      }
+      // Track Metadata & Progress
+      const title = prod.title || prod.track || (isPlaying ? 'Active Playback' : 'Idle Track');
+      const artist = prod.artist || '';
+      const album = prod.album || '';
+      document.getElementById(`track-title-${id}`).textContent = title;
+      document.getElementById(`track-artist-${id}`).textContent = artist ? (album ? `${artist} • ${album}` : artist) : (album || 'Ready for stream');
 
-      // Source / Ingress Parameters
+      const trackDur = prod.track_duration_sec || 0;
+      const trackProg = (prod.track_progress_sec != null && prod.track_progress_sec > 0) ? prod.track_progress_sec : (isPlaying ? (cons.duration_sec || 0) : 0);
+
+      document.getElementById(`tc-${id}`).textContent = formatDuration(trackProg);
+      document.getElementById(`track-timing-${id}`).textContent = trackDur > 0 ? `${formatDuration(trackProg)} / ${formatDuration(trackDur)}` : formatDuration(trackProg);
+
+      // Progress bars
+      const posLabel = document.getElementById(`pos-label-${id}`);
+      const durLabel = document.getElementById(`dur-label-${id}`);
+      const bufLabel = document.getElementById(`buf-label-${id}`);
+      const pplay = document.getElementById(`pplay-${id}`);
+      const pbuf = document.getElementById(`pbuf-${id}`);
+
+      posLabel.textContent = formatDuration(trackProg);
+      durLabel.textContent = trackDur > 0 ? formatDuration(trackDur) : formatDuration(Math.max(trackProg, 30));
+
+      const effectiveTotal = trackDur > 0 ? trackDur : Math.max(trackProg + 10, 30);
+      const playedPercent = Math.min(100, Math.max(0, (trackProg / effectiveTotal) * 100));
+      pplay.style.width = `${playedPercent}%`;
+
+      const upChunks = path.upstream_chunks || 0;
+      const upSec = (upChunks * 20) / 1000;
+      const bufPercent = Math.min(100, Math.max(0, ((trackProg + upSec) / effectiveTotal) * 100));
+      pbuf.style.width = `${bufPercent}%`;
+
+      bufLabel.textContent = isPlaying ? `Ingest: +${Math.round(upSec * 1000)}ms (${upChunks} chunks) • Ready: ${path.conversion_queue || 0} frames` : 'Idle';
+
+      // Pipeline Flow
+      const activeCodec = (cons.active_codec || cons.config_codec || 'g722').toUpperCase();
       const inCodec = (prod.codec || 'Opus').toUpperCase();
       const inRate = prod.sample_rate || 48000;
       const inCh = prod.channels || 2;
-      const inBitDepth = prod.bit_depth || 16;
-      const inBitrate = prod.bitrate_kbps || (inCodec === 'OPUS' ? 128 : 1536);
+      const isPassthrough = path.passthrough || (activeCodec === 'OPUS' && vol >= 100 && inCodec === 'OPUS');
 
-      // Output / Egress Parameters
-      let outRate = 16000;
-      let outCh = 1;
-      let outBitrate = 64;
+      const flow = document.getElementById(`flow-${id}`);
+      flow.innerHTML = `
+        <span class="pipeline-step step-source">SOURCE ${inCodec} ${inRate/1000}kHz ${inCh}ch</span>
+        <span style="color: var(--text-muted);">➔</span>
+        ${isPassthrough ? '<span class="pill-tag tag-passthrough">0-COPY PASSTHROUGH</span>' : '<span class="pill-tag tag-live">TRANSCODE</span>'}
+        <span style="color: var(--text-muted);">➔</span>
+        <span class="pipeline-step step-target">RTP ${activeCodec}</span>
+      `;
 
-      if (isPassthrough) {
-        outRate = inRate;
-        outCh = inCh;
-        outBitrate = inBitrate;
-      } else if (activeCodec === 'OPUS') {
-        outRate = 48000;
-        outCh = inCh;
-        outBitrate = inBitrate || 128;
-      } else if (activeCodec === 'PCMU' || activeCodec === 'PCMA') {
-        outRate = 8000;
-        outCh = 1;
-        outBitrate = 64;
-      } else if (activeCodec === 'L16') {
-        outRate = inRate;
-        outCh = inCh;
-        outBitrate = (inRate * inCh * 16) / 1000;
-      }
+      document.getElementById(`sdp-${id}`).innerHTML = `SDP: <strong style="color: var(--accent-emerald);">${escapeHTML(cons.negotiated_sdp || activeCodec)}</strong>`;
 
-      const srcDetails = `${inCodec} • ${inRate / 1000}kHz • ${inCh === 1 ? '1ch Mono' : '2ch Stereo'} • ${inBitDepth}-bit (${inBitrate} kbps)`;
-      const outDetails = `${activeCodec} • ${outRate / 1000}kHz • ${outCh === 1 ? '1ch Mono' : '2ch Stereo'} • ${outBitrate} kbps • Gain ${vol}% (${volDbStr})`;
-
-      const discovered = cons.discovered_codecs || [];
-      const discoveredBadgesHTML = discovered.length > 0
-        ? discovered.map(c => `<span style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #d8b4fe; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.68rem;">${c.toUpperCase()}</span>`).join(' ')
-        : `<span style="color: var(--text-muted); font-style: italic; font-size: 0.68rem;">Auto discovery</span>`;
-
-      const offeredFmts = prod.offered_formats || [];
-      const exposedBadgesHTML = offeredFmts.length > 0
-        ? offeredFmts.map(f => {
-            const parts = f.split(' ');
-            const label = `${parts[0]} ${parts[1] || ''} ${parts[2] || ''}`.trim();
-            return `<span title="${f}" style="background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3); color: #67e8f9; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.68rem;">${label}</span>`;
-          }).join(' ')
-        : (prod.exposed_codecs && prod.exposed_codecs.length > 0
-          ? prod.exposed_codecs.map(c => `<span style="background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3); color: #67e8f9; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.68rem;">${c.toUpperCase()}</span>`).join(' ')
-          : `<span style="color: var(--text-muted); font-style: italic; font-size: 0.68rem;">OPUS / PCM</span>`);
-
-      document.getElementById(`pipeline-flow-${id}`).innerHTML = `
-        <div style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
-          <!-- Row 1: Source ➔ Mode ➔ Output and SIP / RTP Diagnostics -->
-          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; width: 100%;">
-            <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-family: var(--font-mono); font-size: 0.75rem;">
-              <!-- Source Ingress Pill -->
-              <div style="display: flex; align-items: center; gap: 6px; background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.25); padding: 5px 10px; border-radius: var(--radius-sm);">
-                <span style="color: var(--accent-cyan); font-weight: 700;">SOURCE</span>
-                <span style="color: #fff;">${srcDetails}</span>
-              </div>
-
-              <!-- Transition Mode -->
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="color: var(--text-muted); font-size: 0.85rem;">➔</span>
-                ${isPassthrough ? '<span class="pill-tag mode-passthrough">0-COPY PASSTHROUGH</span>' : '<span class="pill-tag mode-live">TRANSCODE</span>'}
-                <span style="color: var(--text-muted); font-size: 0.85rem;">➔</span>
-              </div>
-
-              <!-- Output Egress Pill -->
-              <div style="display: flex; align-items: center; gap: 6px; background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); padding: 5px 10px; border-radius: var(--radius-sm);">
-                <span style="color: var(--accent-purple); font-weight: 700;">OUTPUT</span>
-                <span style="color: #fff;">${outDetails}</span>
-              </div>
-            </div>
-
-            <!-- Target & Network Diagnostics -->
-            <div style="font-family: var(--font-mono); color: var(--text-secondary); font-size: 0.72rem;">
-              <span>SIP: <strong style="color: var(--accent-cyan);">${escapeHTML(cons.url || 'sip:unknown')}</strong></span> • 
-              <span>RTP: <strong style="color: #fff;">${cons.remote_rtp || 'Pending'}</strong></span> • 
-              <span>Pkts: <strong style="color: #fff;">${(cons.packets_sent || 0).toLocaleString()}</strong></span> • 
-              <span>Call-ID: <strong style="color: var(--text-primary);">${cons.call_id || 'Idle'}</strong></span>
-            </div>
-          </div>
-
-          <!-- Row 2: Capabilities & Codec Discovery Bar -->
-          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; width: 100%; border-top: 1px solid rgba(255, 255, 255, 0.06); padding-top: 8px; font-family: var(--font-mono); font-size: 0.72rem;">
-            <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 16px;">
-              <!-- Endpoint OPTIONS Codecs -->
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="color: var(--text-muted); font-size: 0.68rem; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">Endpoint OPTIONS:</span>
-                <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">${discoveredBadgesHTML}</div>
-              </div>
-
-              <!-- Exposed to Music Assistant -->
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="color: var(--text-muted); font-size: 0.68rem; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">Exposed to Music Assistant:</span>
-                <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">${exposedBadgesHTML}</div>
-              </div>
-            </div>
-
-            <!-- SDP Negotiation info -->
-            <div style="color: var(--text-secondary);">
-              <span>Active SDP: <strong style="color: var(--accent-emerald); font-weight: 700;">${escapeHTML(cons.negotiated_sdp || 'Auto (' + activeCodec + ')')}</strong></span>
-            </div>
-          </div>
-        </div>
+      // Telemetry
+      const telem = document.getElementById(`telem-${id}`);
+      telem.innerHTML = `
+        <span>Remote RTP: <strong style="color: #fff;">${cons.remote_rtp || 'Pending'}</strong></span>
+        <span>Local RTP: <strong style="color: #fff;">${cons.local_rtp || 'Auto'}</strong></span>
+        <span>Packets: <strong style="color: #fff;">${(cons.packets_sent || 0).toLocaleString()}</strong></span>
+        <span>Call-ID: <strong style="color: var(--text-primary);">${cons.call_id || 'Idle'}</strong></span>
       `;
     }
-
-    // High-performance continuous 60fps Real-Time Canvas Timeline Renderer (Streamlined 3-Track Layout)
-    function drawTimelines() {
-      const keys = Object.keys(globalStreams || {});
-
-      for (const id of keys) {
-        const canvas = document.getElementById(`canvas-${id}`);
-        if (!canvas) continue;
-
-        const ctx = canvas.getContext('2d');
-        const dpr = window.devicePixelRatio || 1;
-        const rect = canvas.getBoundingClientRect();
-
-        if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
-          canvas.width = rect.width * dpr;
-          canvas.height = rect.height * dpr;
-        }
-
-        ctx.save();
-        ctx.scale(dpr, dpr);
-        const w = rect.width;
-        const h = rect.height;
-
-        const st = globalStreams[id];
-        const prod = (st.producers && st.producers.length > 0) ? st.producers[0] : {};
-        const cons = (st.consumers && st.consumers.length > 0) ? st.consumers[0] : {};
-        const path = st.audio_path || {};
-
-        const isPlaying = st.state === 'playing' || st.state === 'active';
-        const isDialing = st.state === 'dialing';
-        const isPaused = st.state === 'paused';
-        const currentPosition = (isPlaying || isPaused || isDialing) ? ((prod.track_progress_sec != null && prod.track_progress_sec > 0) ? prod.track_progress_sec : (cons.duration_sec || 0)) : 0;
-        const trackDuration = prod.track_duration_sec || 0;
-
-        const upstreamChunks = path.upstream_chunks || 0;
-        const upstreamSec = (upstreamChunks * 20) / 1000;
-
-
-        const convQueue = path.conversion_queue || 0;
-        const convSec = (convQueue * 20) / 1000;
-
-        // Full Song Timeline Window (From 0:00 to Track End / Buffer Horizon)
-        const timePlayhead = (isPlaying || isDialing) ? (path.playhead_sec != null ? path.playhead_sec : currentPosition) : (isPaused ? currentPosition : 0);
-        const windowStart = 0;
-        const totalDuration = trackDuration > 0 ? trackDuration : Math.max(30, timePlayhead + upstreamSec + 10);
-        const windowEnd = Math.max(totalDuration, timePlayhead + upstreamSec + 2.0);
-        const windowDuration = Math.max(1, windowEnd - windowStart);
-
-        const headerWidth = 190;
-        const trackAreaWidth = w - headerWidth;
-
-        function timeToX(t) {
-          return headerWidth + ((t - windowStart) / windowDuration) * trackAreaWidth;
-        }
-
-        // 1. Canvas Background
-        ctx.fillStyle = '#080c14';
-        ctx.fillRect(0, 0, w, h);
-
-        // 2. Real-Time Time Ruler at top
-        const rulerH = 24;
-        ctx.fillStyle = '#05080e';
-        ctx.fillRect(0, 0, w, rulerH);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(0, 0, w, rulerH);
-
-        // Intelligent tick intervals based on total song duration
-        let tickStep = 10;
-        if (windowDuration > 300) {
-          tickStep = 60;
-        } else if (windowDuration > 120) {
-          tickStep = 30;
-        } else if (windowDuration > 45) {
-          tickStep = 15;
-        } else if (windowDuration > 15) {
-          tickStep = 5;
-        } else {
-          tickStep = 1;
-        }
-
-        const firstTick = Math.floor(windowStart / tickStep) * tickStep;
-        ctx.font = '10px JetBrains Mono';
-        ctx.fillStyle = '#64748b';
-        ctx.textAlign = 'center';
-
-        for (let t = firstTick; t <= windowEnd; t += tickStep) {
-          const x = timeToX(t);
-          if (x >= headerWidth && x <= w) {
-            ctx.beginPath();
-            ctx.moveTo(x, rulerH - 5);
-            ctx.lineTo(x, rulerH);
-            ctx.stroke();
-            ctx.fillText(formatDuration(t), x, rulerH - 8);
-          }
-        }
-
-        // 3. Streamlined Multi-Track Rows (Media Track, Ingest Buffer, Ready Queue)
-        const currentTitle = prod.title || prod.track || (isPlaying ? 'Active Audio Stream' : 'Idle Track');
-        const currentArtist = prod.artist || '';
-        const currentTrackLabel = currentArtist ? `${currentArtist} — ${currentTitle}` : currentTitle;
-
-        const trackDefs = [
-          { 
-            id: 'media',
-            name: '🎵 Media Track', 
-            tag: isPlaying ? (trackDuration > 0 ? `${formatDuration(timePlayhead)} / ${formatDuration(trackDuration)}` : 'ACTIVE') : (isDialing ? 'DIALING' : 'IDLE'), 
-            tagColor: '#ec4899',
-            rowH: 44 
-          },
-          { 
-            id: 'ingest',
-            name: '📥 Ingest Buffer', 
-            tag: `${upstreamChunks} chunks (+${Math.round(upstreamSec * 1000)}ms)`, 
-            tagColor: '#00f0ff',
-            rowH: 38 
-          },
-          { 
-            id: 'ready',
-            name: '⚙️ Ready Queue', 
-            tag: path.passthrough ? '0-COPY PASS' : `${convQueue} frames`, 
-            tagColor: '#10b981',
-            rowH: 38 
-          }
-        ];
-
-        let startY = rulerH + 4;
-        let streamBottomY = rulerH;
-
-        for (let i = 0; i < trackDefs.length; i++) {
-          const track = trackDefs[i];
-          const y = startY;
-          startY += track.rowH + 4;
-
-          streamBottomY = y + track.rowH;
-
-          // Track lane background
-          ctx.fillStyle = '#0c1220';
-          ctx.fillRect(headerWidth, y, trackAreaWidth, track.rowH);
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-          ctx.strokeRect(headerWidth, y, trackAreaWidth, track.rowH);
-
-          // Track Header Label on Left
-          ctx.fillStyle = '#101626';
-          ctx.fillRect(0, y, headerWidth, track.rowH);
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-          ctx.strokeRect(0, y, headerWidth, track.rowH);
-
-          ctx.textAlign = 'left';
-          ctx.font = 'bold 11px Inter';
-          ctx.fillStyle = '#f1f5f9';
-          ctx.fillText(track.name, 10, y + 18);
-
-          // Pill tag inside header
-          ctx.font = 'bold 9px JetBrains Mono';
-          ctx.fillStyle = track.tagColor;
-          ctx.fillText(track.tag, 10, y + track.rowH - 10);
-
-          // Render Track Specific Content
-          if (track.id === 'media') {
-            // Track 1: Media Track (Full Song Span from 0:00 to Track End)
-            const songStart = 0;
-            const songEnd = trackDuration > 0 ? trackDuration : Math.max(timePlayhead + 15, 30);
-
-            const x0 = timeToX(songStart);
-            const xEnd = Math.min(w, timeToX(songEnd));
-            const fullTrackW = Math.max(40, xEnd - x0);
-
-            // Unplayed Track Background Shell
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.roundRect(x0, y + 4, fullTrackW, track.rowH - 8, 4);
-            ctx.fill();
-            ctx.stroke();
-
-            // Played Active Song Block (from 0 to Playhead)
-            const playedXEnd = Math.min(xEnd, Math.max(x0 + 4, timeToX(timePlayhead)));
-            const playedW = playedXEnd - x0;
-
-            const grad = ctx.createLinearGradient(x0, 0, playedXEnd, 0);
-            grad.addColorStop(0, '#6366f1');
-            grad.addColorStop(0.6, '#8b5cf6');
-            grad.addColorStop(1, '#ec4899');
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.roundRect(x0, y + 4, playedW, track.rowH - 8, 4);
-            ctx.fill();
-
-            // Current Song Label
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 11px Inter';
-            ctx.fillText(`▶ ${currentTrackLabel}`, x0 + 10, y + 20);
-
-            if (prod.album) {
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-              ctx.font = '10px Inter';
-              ctx.fillText(`💽 ${prod.album}`, x0 + 10, y + 34);
-            }
-
-            // Track End Marker
-            if (trackDuration > 0) {
-              const trackEndX = timeToX(trackDuration);
-              if (trackEndX >= headerWidth && trackEndX <= w) {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-                ctx.lineWidth = 1.5;
-                ctx.setLineDash([3, 3]);
-                ctx.beginPath();
-                ctx.moveTo(trackEndX, y + 2);
-                ctx.lineTo(trackEndX, y + track.rowH - 2);
-                ctx.stroke();
-                ctx.setLineDash([]);
-
-                ctx.fillStyle = '#f8fafc';
-                ctx.font = '9px JetBrains Mono';
-                ctx.textAlign = 'right';
-                ctx.fillText(`End: ${formatDuration(trackDuration)}`, trackEndX - 4, y + track.rowH - 6);
-                ctx.textAlign = 'left';
-              }
-
-              // Dynamic Next Song Horizon when audio buffer extends beyond track end
-              const bufferHorizon = timePlayhead + upstreamSec;
-              if (bufferHorizon > trackDuration) {
-                const nextX1 = Math.max(headerWidth, timeToX(trackDuration));
-                const nextX2 = Math.min(w, timeToX(bufferHorizon));
-                const nextW = Math.max(20, nextX2 - nextX1);
-
-                ctx.fillStyle = 'rgba(168, 85, 247, 0.25)';
-                ctx.strokeStyle = '#a855f7';
-                ctx.setLineDash([4, 4]);
-                ctx.beginPath();
-                ctx.roundRect(nextX1, y + 4, nextW, track.rowH - 8, 4);
-                ctx.fill();
-                ctx.stroke();
-                ctx.setLineDash([]);
-
-                const prebufMs = Math.round((bufferHorizon - trackDuration) * 1000);
-                ctx.fillStyle = '#d8b4fe';
-                ctx.font = 'bold 10px JetBrains Mono';
-                ctx.fillText(`⏭️ Next Track (+${prebufMs}ms)`, nextX1 + 8, y + 20);
-                ctx.fillStyle = '#94a3b8';
-                ctx.font = '9px JetBrains Mono';
-                ctx.fillText('Gapless Playout Ready', nextX1 + 8, y + 34);
-              }
-            }
-          } else if (track.id === 'ingest') {
-            // Track 2: Upstream Ingest Buffer Span (Directly from Go Upstream Buffer timestamps)
-            const bStart = path.buffer_start_sec != null ? path.buffer_start_sec : timePlayhead;
-            const bEnd = path.buffer_end_sec != null ? path.buffer_end_sec : (timePlayhead + upstreamSec);
-
-            const x1 = Math.max(headerWidth, timeToX(bStart));
-            const x2 = Math.min(w, timeToX(bEnd));
-            const blockW = Math.max(4, x2 - x1);
-
-            ctx.fillStyle = 'rgba(0, 240, 255, 0.35)';
-            ctx.strokeStyle = '#00f0ff';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.roundRect(x1, y + 4, blockW, track.rowH - 8, 4);
-            ctx.fill();
-            ctx.stroke();
-
-            ctx.fillStyle = '#00f0ff';
-            ctx.font = 'bold 10px JetBrains Mono';
-            if (blockW > 50) {
-              const durMs = Math.round(Math.max(0, bEnd - bStart) * 1000);
-              ctx.fillText(`+${durMs}ms (${upstreamChunks} chunks)`, x1 + 6, y + 22);
-            }
-          } else if (track.id === 'ready') {
-            // Track 3: AudioPath Ready Frames Span (Directly from Go AudioPath Ready queue timestamps)
-            const rStart = path.ready_start_sec != null ? path.ready_start_sec : timePlayhead;
-            const rEnd = path.ready_end_sec != null ? path.ready_end_sec : (timePlayhead + convSec);
-
-            const x1 = Math.max(headerWidth, timeToX(rStart));
-            const x2 = Math.min(w, timeToX(rEnd));
-            const blockW = Math.max(4, x2 - x1);
-
-            ctx.fillStyle = 'rgba(16, 185, 129, 0.35)';
-            ctx.strokeStyle = '#10b981';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.roundRect(x1, y + 4, blockW, track.rowH - 8, 4);
-            ctx.fill();
-            ctx.stroke();
-
-            ctx.fillStyle = '#10b981';
-            ctx.font = 'bold 10px JetBrains Mono';
-            if (blockW > 50) {
-              ctx.fillText(`Ready (${convQueue} frames)`, x1 + 6, y + 22);
-            }
-          }
-        }
-
-        // 4. Stream Playhead Marker
-        const playheadX = timeToX(timePlayhead);
-        if (playheadX >= headerWidth && playheadX <= w) {
-          ctx.strokeStyle = '#00f0ff';
-          ctx.lineWidth = 2;
-          ctx.shadowColor = '#00f0ff';
-          ctx.shadowBlur = 8;
-
-          ctx.beginPath();
-          ctx.moveTo(playheadX, 0);
-          ctx.lineTo(playheadX, streamBottomY);
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-
-          // Downward arrow marker from top ruler
-          ctx.fillStyle = '#00f0ff';
-          ctx.beginPath();
-          ctx.moveTo(playheadX, rulerH - 2);
-          ctx.lineTo(playheadX - 5, rulerH - 8);
-          ctx.lineTo(playheadX + 5, rulerH - 8);
-          ctx.closePath();
-          ctx.fill();
-
-          // Stream Playhead Timecode Badge
-          ctx.font = 'bold 9px JetBrains Mono';
-          ctx.fillStyle = '#00f0ff';
-          ctx.textAlign = 'center';
-          ctx.fillText(`▶ ${formatDuration(timePlayhead)}`, playheadX, rulerH + 12);
-        }
-
-        ctx.restore();
-      }
-
-      requestAnimationFrame(drawTimelines);
-    }
-
 
     async function openCodecsModal() {
       const modal = document.getElementById('codecsModal');
@@ -1436,8 +840,7 @@
         const res = await fetch('/api/codecs');
         if (res.ok) {
           const data = await res.json();
-          const tbody = document.getElementById('codecTableBody');
-          tbody.innerHTML = (data.codecs || []).map(c => `
+          document.getElementById('codecTableBody').innerHTML = (data.codecs || []).map(c => `
             <tr>
               <td style="color: var(--accent-cyan); font-weight: 700;">${c.name}</td>
               <td style="color: #fff;">${c.sdp_name}</td>
@@ -1445,7 +848,7 @@
               <td>${c.audio_sample_rate} Hz</td>
               <td>${c.channels} ch</td>
               <td>${c.payload_type}</td>
-              <td style="color: var(--text-secondary); font-size: 0.75rem; font-family: var(--font-sans);">${c.description || 'Standard audio codec'}</td>
+              <td style="color: var(--text-secondary);">${c.description || 'Standard codec'}</td>
             </tr>
           `).join('');
         }
@@ -1463,8 +866,7 @@
     function inspectStreamJson(id) {
       const modal = document.getElementById('jsonModal');
       document.getElementById('jsonModalTitle').textContent = `Stream Telemetry: ${id}`;
-      const data = globalStreams[id] || {};
-      document.getElementById('jsonModalCode').textContent = JSON.stringify(data, null, 2);
+      document.getElementById('jsonModalCode').textContent = JSON.stringify(globalStreams[id] || {}, null, 2);
       modal.classList.add('open');
     }
 
@@ -1483,11 +885,10 @@
     }
 
     function formatDuration(sec) {
-      if (!sec || sec <= 0) return '00:00.00';
+      if (!sec || sec <= 0) return '00:00';
       const m = Math.floor(sec / 60);
       const s = Math.floor(sec % 60);
-      const ms = Math.floor((sec % 1) * 100);
-      return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}.${ms < 10 ? '0' : ''}${ms}`;
+      return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
     }
 
     function escapeHTML(str) {
@@ -1503,7 +904,6 @@
     fetchData();
     initSSE();
     setInterval(fetchData, 1000);
-    requestAnimationFrame(drawTimelines);
   </script>
 </body>
 </html>

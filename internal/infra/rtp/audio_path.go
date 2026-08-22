@@ -80,6 +80,10 @@ func NewAudioPath(transcoder app.AudioTranscoderPort, upstream *UpstreamPlayer, 
 func (a *AudioPath) resetConversionBuffersLocked(rewindUpstream bool) {
 	a.ready = nil
 	a.pcmBuffer = nil
+	a.pcmAccumulatedTime = 0
+	a.pcmPlayAt = time.Time{}
+	a.pcmTimestampUs = 0
+	a.pcmSampleRate = 0
 	a.chunksPendingCount = 0
 	if resetter, ok := a.transcoder.(interface{ Reset() }); ok {
 		resetter.Reset()

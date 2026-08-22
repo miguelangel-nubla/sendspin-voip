@@ -39,24 +39,32 @@ func NewUpstreamPlayer(maxCapacity int) *UpstreamPlayer {
 }
 
 // Push appends an incoming raw audio chunk into the raw timeline in chronological order.
-// Uses PlayAt target wall-clock time when available to ensure seamless gapless transitions
-// across track boundaries when Sendspin pre-buffers the next song.
-func (u *UpstreamPlayer) Push(chunk domain.AudioChunk) {
+// Returns true if a seek jump / timeline discontinuity was detected and the audio pipeline needs clearing.
+func (u *UpstreamPlayer) Push(chunk domain.AudioChunk) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-
-	if len(u.chunks) >= u.maxCapacity {
-		// Tail-drop on capacity overflow to preserve stream start
-		return
-	}
 
 	n := len(u.chunks)
 	if n == 0 {
 		u.chunks = append(u.chunks, chunk)
-		return
+		return false
 	}
 
 	last := u.chunks[n-1]
+	// Detect seek discontinuity: if incoming chunk jumps forward by > 1.5s or jumps backward
+	if !chunk.PlayAt.IsZero() && !last.PlayAt.IsZero() {
+		gap := chunk.PlayAt.Sub(last.PlayAt)
+		if gap < -500*time.Millisecond || gap > 1500*time.Millisecond {
+			// Discontinuity / seek detected!
+			return true
+		}
+	}
+
+	if len(u.chunks) >= u.maxCapacity {
+		// Tail-drop on capacity overflow to preserve stream start
+		return false
+	}
+
 	isAfterLast := false
 	if !chunk.PlayAt.IsZero() && !last.PlayAt.IsZero() {
 		isAfterLast = !chunk.PlayAt.Before(last.PlayAt)
@@ -66,7 +74,7 @@ func (u *UpstreamPlayer) Push(chunk domain.AudioChunk) {
 
 	if isAfterLast {
 		u.chunks = append(u.chunks, chunk)
-		return
+		return false
 	}
 
 	// Insert in chronological order by PlayAt timeline
@@ -91,6 +99,7 @@ func (u *UpstreamPlayer) Push(chunk domain.AudioChunk) {
 	if idx < u.readIdx {
 		u.readIdx++
 	}
+	return false
 }
 
 // PeekNext returns the next unread raw chunk for conversion without consuming it.

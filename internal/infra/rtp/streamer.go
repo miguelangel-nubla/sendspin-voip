@@ -144,7 +144,13 @@ func (s *Session) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 			s.audioPath.SetVolume(volumePercent)
 		}
 	}
-	s.upstream.Push(chunk)
+	if s.upstream.Push(chunk) {
+		// Seek jump / discontinuity occurred: flush converted frames and reset RTP marker
+		s.audioPath.Clear()
+		s.transmitter.ResetMarker()
+		// Re-push the new chunk into fresh upstream
+		s.upstream.Push(chunk)
+	}
 	return nil
 }
 
