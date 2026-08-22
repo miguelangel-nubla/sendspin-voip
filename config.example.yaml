@@ -1,46 +1,46 @@
 # sendspin-voip Configuration Example
-log_level: info # debug, info, warn, error
+# Only the un-commented settings below are required. All other settings have sensible defaults.
+
+# log_level: info # debug, info, warn, error (default: info)
 
 # Where per-player volume/mute state is persisted across restarts.
-# Leave blank to use /data/sendspin-voip-state.json inside a Home Assistant
-# add-on (the only directory HA persists across restarts and upgrades) and
-# ./sendspin-voip-state.json elsewhere. Override with STATE_FILE.
-state_file: ""
+# Default: /data/sendspin-voip-state.json in Home Assistant, ./sendspin-voip-state.json elsewhere.
+# state_file: ""
 
 # Web UI & Debug HTTP API (go2rtc style)
-http:
-  listen: ":8080" # Web UI dashboard at http://localhost:8080/ and JSON at /api/streams
-  api_token: "" # Optional: require Authorization: Bearer <token>, X-Api-Token, or ?token=
-  enable_pprof: false # Expose /debug/pprof (keep false on host-network installs)
+# http:
+#   listen: ":8080" # Web UI dashboard at http://localhost:8080/ and JSON at /api/streams
+#   api_token: "" # Optional: require Authorization: Bearer <token>, X-Api-Token, or ?token=
+#   enable_pprof: false # Expose /debug/pprof (keep false on host-network installs)
 
 # SIP PBX / Server Connection
 sip:
-  mode: pbx # "pbx" (registered with credentials) or "direct" (peer-to-peer LAN dialing)
-  server: "192.168.1.50:5060"
+  server: "192.168.1.50:5060" # PBX IP/hostname:port or direct target
   username: "sendspin_bridge"
   password: "your_sip_password"
-  domain: "192.168.1.50"
-  transport: udp # udp or tcp
-  local_ip: "" # Leave blank for auto-detection of host LAN IP
-  local_sip_port: 5060
-  rtp_port_min: 10000
-  rtp_port_max: 20000
+  # mode: pbx # "pbx" (registered with credentials) or "direct" (peer-to-peer LAN dialing)
+  # domain: "192.168.1.50" # SIP realm/domain (defaults to server)
+  # transport: udp # udp or tcp (default: udp)
+  # local_ip: "" # Leave blank for auto-detection of host LAN IP
+  # local_sip_port: 5060 # Local SIP listening port (default: 5060)
+  # rtp_port_min: 10000 # Minimum UDP port for RTP media
+  # rtp_port_max: 20000 # Maximum UDP port for RTP media
 
   # Default Auto-Answer Preset:
   # Options: default, intercom, yealink, grandstream, snom, call_info, p_auto, none, custom
-  auto_answer_preset: default
-  custom_auto_answer_header: ""
+  auto_answer_preset: intercom
+  # custom_auto_answer_header: "" # Used when auto_answer_preset is "custom"
 
 # Sendspin Server / Discovery
-sendspin:
-  server: "auto" # "auto" uses mDNS (_sendspin._tcp), or specify "ws://192.168.1.10:8095"
-  buffer_ms: 500
+# sendspin:
+#   server: "auto" # "auto" uses mDNS (_sendspin._tcp), or specify "192.168.1.10:8927"
+#   buffer_ms: 500 # Stream pre-buffering window in ms (default: 500)
 
 # Bridge Runtime Tuning
-bridge:
-  drain_delay_ms: 500 # Trailing silence before BYE (prevents cutting end of TTS)
-  idle_hangup_delay_ms: 5000 # Linger delay before hanging up idle call (enables seamless seek, pause, and track change)
-  target_conflict_policy: preempt_higher # preempt_higher, preempt_always, busy
+# bridge:
+#   drain_delay_ms: 500 # Trailing silence before BYE in ms (prevents cutting end of TTS)
+#   idle_hangup_delay_ms: 5000 # Linger delay before hanging up idle call (enables seamless seek, pause, and track change)
+#   target_conflict_policy: preempt_higher # preempt_higher, preempt_always, busy
 
 # Virtual Player mappings to SIP targets
 # The same SIP target can be mapped to multiple players with different priorities and behaviors!
@@ -48,35 +48,32 @@ players:
   # Player 1: Desk Phone Profile for High-Priority Announcements
   - id: "office_phone_announcement"
     name: "Office Phone (Announcements)"
-    sip_target: "sip:101@192.168.1.50"
-    codec: auto # auto (discovers best: opus > g722 > pcmu > pcma), or lock to specific codec
-    auto_answer: intercom # Force auto-answer on speakerphone
+    sip_target: "101" # Extension number, "sip:101", or full "sip:101@192.168.1.50"
+    auto_answer: intercom # Force auto-answer on speakerphone (intercom, default, yealink, snom, etc.)
     priority: 10 # High priority: preempts background music on Ext 101
-    default_volume: 100
+    # codec: auto # auto (discovers best: opus > g722 > pcmu > pcma), or lock to specific codec
+    # default_volume: 100 # 0-100
 
   # Player 2: Desk Phone Profile for Background Music
   - id: "office_phone_music"
     name: "Office Phone (Music)"
-    sip_target: "sip:101@192.168.1.50"
-    codec: auto
+    sip_target: "101"
     auto_answer: intercom
-    priority: 1
-    default_volume: 60
+    priority: 1 # Lower priority: will be preempted by announcements on Ext 101
+    # codec: auto
+    # default_volume: 60
 
-  # Player 3: Desk Phone Profile for Doorbell / Chime (Phone Rings Handset)
-  - id: "office_phone_ring"
-    name: "Office Phone (Doorbell Ring)"
-    sip_target: "sip:101@192.168.1.50"
-    codec: pcmu
-    auto_answer: none # Do not auto-answer; phone will ring
-    priority: 5
-    default_volume: 90
+  # Player 3: Doorbell / Ring Chime (Phone Rings Handset)
+  # - id: "office_phone_ring"
+  #   name: "Office Phone (Doorbell Ring)"
+  #   sip_target: "101"
+  #   auto_answer: none # Do not auto-answer; phone will ring
+  #   priority: 5
+  #   default_volume: 90
 
   # Player 4: Warehouse Intercom Paging Horn (Direct IP Dialing)
-  - id: "warehouse_paging"
-    name: "Warehouse Paging Horn"
-    sip_target: "sip:192.168.1.180:5060" # Direct P2P dialing
-    codec: pcmu
-    auto_answer: grandstream
-    priority: 10
-    default_volume: 100
+  # - id: "warehouse_paging"
+  #   name: "Warehouse Paging Horn"
+  #   sip_target: "sip:192.168.1.180:5060" # Direct P2P dialing
+  #   auto_answer: grandstream
+  #   priority: 10

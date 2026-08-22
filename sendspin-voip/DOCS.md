@@ -26,21 +26,13 @@ sip:
   server: "192.168.1.50:5060"
   username: "sendspin"
   password: "your_sip_password"
-  domain: "192.168.1.50"
-  auto_answer_preset: "default"
+  auto_answer_preset: "intercom"
 
 players:
-  - id: "office_phone_announcement"
-    name: "Office Desk (Announcements)"
-    sip_target: "sip:101@192.168.1.50"
-    codec: "g722"
+  - id: "office_phone"
+    name: "Office Desk Phone"
+    sip_target: "101"
     priority: 10
-
-  - id: "office_phone_music"
-    name: "Office Desk (Music)"
-    sip_target: "sip:101@192.168.1.50"
-    codec: "g722"
-    priority: 1
 ```
 
 

@@ -52,46 +52,79 @@ services:
 
 ---
 
-## ⚙️ Configuration Example (`config.yaml`)
+## ⚙️ Configuration Reference
+
+### Minimal Working Example (`config.yaml`)
 
 ```yaml
-# SIP PBX / Server Connection
 sip:
   server: "192.168.1.50:5060"
   username: "sendspin"
   password: "your_sip_password"
-  domain: "192.168.1.50"
-  auto_answer_preset: "default" # default, intercom, yealink, grandstream, snom, none
+  auto_answer_preset: intercom
 
-# Your configured phones / players
 players:
-  # Example 1: Office Desk Phone for Announcements (Forces auto-answer, zero speech clipping)
-  - id: "office_phone_announcement"
-    name: "Office Desk (Announcements)"
-    sip_target: "sip:101@192.168.1.50"
-    codec: "g722" # HD Voice
-    auto_answer: "intercom"
+  - id: "office_phone"
+    name: "Office Desk Phone"
+    sip_target: "101"
     priority: 10
-    default_volume: 100
-
-  # Example 2: Office Desk Phone for Background Music (Synchronized playback)
-  - id: "office_phone_music"
-    name: "Office Desk (Music)"
-    sip_target: "sip:101@192.168.1.50"
-    codec: "g722"
-    auto_answer: "intercom"
-    priority: 1
-    default_volume: 50
-
-  # Example 3: Doorbell / Ring Chime (Rings the phone instead of speakerphone)
-  - id: "office_phone_doorbell"
-    name: "Office Phone (Doorbell Ring)"
-    sip_target: "sip:101@192.168.1.50"
-    codec: "pcmu"
-    auto_answer: "none"
-    priority: 5
-    default_volume: 80
 ```
+
+### Full Configuration Options
+
+#### Root Settings
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `log_level` | string | `info` | Logging verbosity: `debug`, `info`, `warn`, `error`. |
+| `state_file` | string | `""` (auto) | File path where volume/mute state is persisted. Defaults to `/data/sendspin-voip-state.json` on Home Assistant, `./sendspin-voip-state.json` elsewhere. |
+
+#### `http` (Web UI & Debug API)
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `http.listen` | string | `":8080"` | Listening address and port for Web UI dashboard and REST API. |
+| `http.api_token` | string | `""` | Optional auth token required via `Authorization: Bearer <token>`, `X-Api-Token`, or `?token=`. |
+| `http.enable_pprof` | boolean | `false` | Expose `/debug/pprof` profiling endpoints. |
+
+#### `sip` (SIP PBX & Signaling)
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `sip.server` | string | *required in PBX mode* | Hostname/IP and port of the SIP PBX or destination (e.g. `"192.168.1.50:5060"`). |
+| `sip.username` | string | `"sendspin"` | SIP extension username / auth ID. |
+| `sip.password` | string | `""` | SIP account password for PBX authentication. |
+| `sip.mode` | string | `"pbx"` | `"pbx"` (registered with credentials) or `"direct"` (peer-to-peer LAN dialing). |
+| `sip.domain` | string | `""` (auto) | SIP realm / domain for `From:`/`To:` headers (defaults to `sip.server`). |
+| `sip.transport` | string | `"udp"` | Network transport: `"udp"` or `"tcp"`. |
+| `sip.local_ip` | string | `""` (auto) | Host LAN IP advertised in SDP. Auto-detected via route to `sip.server` if blank. |
+| `sip.local_sip_port` | integer | `5060` | Local UDP/TCP port for SIP listening. |
+| `sip.rtp_port_min` | integer | `10000` | Minimum UDP port for dynamic RTP media allocation. |
+| `sip.rtp_port_max` | integer | `20000` | Maximum UDP port for dynamic RTP media allocation. |
+| `sip.auto_answer_preset` | string | `"default"` | Default auto-answer header preset: `default`, `intercom`, `yealink`, `grandstream`, `snom`, `call_info`, `p_auto`, `none`, `custom`. |
+| `sip.custom_auto_answer_header` | string | `""` | Raw SIP header line when `auto_answer_preset` is set to `"custom"`. |
+
+#### `sendspin` (Music Assistant Upstream)
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `sendspin.server` | string | `"auto"` | `"auto"` discovers Music Assistant via mDNS (`_sendspin._tcp`), or specify `"192.168.1.10:8927"`. |
+| `sendspin.buffer_ms` | integer | `500` | Stream pre-buffering window in milliseconds. |
+
+#### `bridge` (Runtime Tuning)
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `bridge.drain_delay_ms` | integer | `500` | Trailing silence delay in ms before sending SIP BYE (prevents clipping the end of TTS). |
+| `bridge.idle_hangup_delay_ms` | integer | `5000` | Linger delay in ms before hanging up an idle SIP call (enables seamless seeks, pauses, and track changes). |
+| `bridge.target_conflict_policy` | string | `"preempt_higher"` | Concurrency policy when multiple players target the same phone: `preempt_higher`, `preempt_always`, or `busy`. |
+
+#### `players` (Virtual Player Mappings)
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | string | *required* | Unique player identifier published to Music Assistant (e.g. `"office_phone"`). |
+| `name` | string | same as `id` | Friendly player name shown in Music Assistant and Home Assistant. |
+| `sip_target` | string | *required* | Target extension (e.g. `"101"`, `"sip:101"`, or full `"sip:101@192.168.1.50"`). |
+| `codec` | string | `"auto"` | Codec to offer: `"auto"` (negotiates highest fidelity: `opus` > `l16` > `g722` > `pcmu` > `pcma`), or lock to specific codec. |
+| `auto_answer` | string | inherits from `sip` | Per-player auto-answer preset override (`intercom`, `none`, etc.). |
+| `custom_auto_answer_header` | string | `""` | Per-player custom header when `auto_answer: "custom"`. |
+| `priority` | integer | `0` | Player priority level (higher numbers preempt lower ones on the same physical phone). |
+| `default_volume` | integer | `100` | Initial volume percentage (`0`–`100`). |
 
 
 ---
