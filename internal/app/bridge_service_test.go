@@ -813,3 +813,71 @@ func waitForCallAnswered(t *testing.T, bridge *BridgeService, playerID string) {
 	t.Fatalf("call for %s was never answered", playerID)
 }
 
+func TestBridgeService_PauseImmediatelyStopsAudio(t *testing.T) {
+	sipCaller := &mockSIPCaller{}
+	rtpStreamer := &mockRTPStreamer{}
+	ingress := &mockIngress{}
+	arbiter := domain.NewTargetArbiter(domain.ConflictPolicyPreemptHigher)
+
+	bridge := NewBridgeService(
+		nil,
+		BridgeConfig{
+			DrainDelayMs:      50,
+			IdleHangupDelayMs: 200,
+		},
+		arbiter,
+		sipCaller,
+		rtpStreamer,
+		ingress,
+		nil,
+	)
+
+	_ = bridge.RegisterPlayers([]domain.PlayerConfig{{
+		ID:        "player-test",
+		SIPTarget: "sip:101@192.168.1.50",
+		Codec:     domain.CodecG722,
+	}})
+
+	bridge.OnStreamStart("player-test", domain.StreamMetadata{Title: "Song"})
+	waitForCallAnswered(t, bridge, "player-test")
+
+	// Push audio
+	bridge.OnAudioChunk("player-test", domain.AudioChunk{
+		Samples:    make([]int32, 960),
+		SampleRate: 48000,
+		Channels:   1,
+	})
+
+	val, ok := bridge.activeCalls.Load("player-test")
+	if !ok {
+		t.Fatal("expected active call")
+	}
+	call := val.(*activeCallState)
+	sess := call.rtpSession.(*mockRTPSession)
+
+	if sess.chunksPushed != 1 {
+		t.Fatalf("expected 1 pushed chunk, got %d", sess.chunksPushed)
+	}
+
+	// User pauses playback
+	bridge.OnPlaybackState("player-test", "paused")
+
+	// Buffer must be immediately cleared
+	if sess.chunksPushed != 0 {
+		t.Fatalf("expected 0 chunks after pause, got %d", sess.chunksPushed)
+	}
+
+	// Any audio chunk sent during pause must be ignored
+	bridge.OnAudioChunk("player-test", domain.AudioChunk{
+		Samples:    make([]int32, 960),
+		SampleRate: 48000,
+		Channels:   1,
+	})
+	if sess.chunksPushed != 0 {
+		t.Fatalf("expected 0 chunks after audio chunk ignored while paused, got %d", sess.chunksPushed)
+	}
+
+	bridge.Shutdown()
+}
+
+

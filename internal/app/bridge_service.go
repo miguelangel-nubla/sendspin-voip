@@ -441,6 +441,12 @@ func (s *BridgeService) OnPlaybackState(playerID string, state string) {
 	s.logger.Debug("Playback state changed", "player_id", playerID, "state", state)
 	switch state {
 	case "paused", "stopped":
+		if val, ok := s.activeCalls.Load(playerID); ok {
+			call := val.(*activeCallState)
+			if call.rtpSession != nil {
+				call.rtpSession.ClearBuffer()
+			}
+		}
 		s.handleStreamPauseOrStop(playerID)
 	case "playing":
 		s.playersMu.Lock()
@@ -462,17 +468,24 @@ func (s *BridgeService) OnAudioChunk(playerID string, chunk domain.AudioChunk) {
 		return
 	}
 	call := val.(*activeCallState)
-	call.cancelLinger()
 
 	s.playersMu.RLock()
+	isPlaying := false
 	volume := 100
 	if p, ok := s.players[playerID]; ok {
+		isPlaying = p.IsPlaying
 		volume = p.Volume
 		if p.IsMuted {
 			volume = 0
 		}
 	}
 	s.playersMu.RUnlock()
+
+	if !isPlaying {
+		return
+	}
+
+	call.cancelLinger()
 
 	if err := call.rtpSession.PushAudio(chunk, volume); err != nil {
 		s.logger.Debug("Failed to push audio to RTP session", "player_id", playerID, "err", err)

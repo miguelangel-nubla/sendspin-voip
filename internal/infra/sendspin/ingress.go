@@ -479,18 +479,13 @@ func (ing *Ingress) runPlayerClient(w *playerWorker) {
 			}
 		}
 
-		var offeredFormats []string
-		for _, f := range supportedFormats {
-			offeredFormats = append(offeredFormats, fmt.Sprintf("%s %dHz %dch %dbit", strings.ToUpper(f.Codec), f.SampleRate, f.Channels, f.BitDepth))
-		}
-
 		w.statsMu.Lock()
 		w.connected = true
 		w.currentCodec = primaryCodec
 		w.currentRate = primaryRate
 		w.currentChannels = primaryChannels
 		w.currentBitDepth = primaryBitDepth
-		w.offeredFormats = offeredFormats
+		w.offeredFormats = offeredFmtStrings
 		w.clockSynced = false
 		w.clockOffsetUs = 0
 		w.statsMu.Unlock()

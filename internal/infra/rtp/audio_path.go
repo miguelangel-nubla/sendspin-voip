@@ -52,12 +52,11 @@ type AudioPath struct {
 
 	// Telemetry & diagnostics
 	pathMode            string
-	pathSummary         string
-	pathStages          []string
 	pathVolumePercent   int
 	pathIngressCodec    string
 	pathIngressRate     int
 	pathIngressChannels int
+	pathDecodedLocally  bool
 	passthroughPackets  uint64
 	transcodePackets    uint64
 }
@@ -152,14 +151,6 @@ func (a *AudioPath) Fill(maxReadyFrames int) error {
 	return nil
 }
 
-// FillFromUpstream is provided for explicit caller integration.
-func (a *AudioPath) FillFromUpstream(upstream *UpstreamPlayer, maxReadyFrames int) error {
-	a.mu.Lock()
-	a.upstream = upstream
-	a.mu.Unlock()
-	return a.Fill(maxReadyFrames)
-}
-
 // ProcessChunkLocked converts a raw chunk into ready frames (caller must hold a.mu).
 func (a *AudioPath) processChunkLocked(chunk domain.AudioChunk) error {
 	inCodec := "pcm"
@@ -201,15 +192,12 @@ func (a *AudioPath) processChunkLocked(chunk domain.AudioChunk) error {
 			ChunksConsumed: consumed,
 		})
 		a.passthroughPackets++
-		a.recordPath(pathSnapshot{
-			mode:            "opus_passthrough",
-			volume:          a.volume,
-			ingressCodec:    inCodec,
-			ingressRate:     inRate,
-			ingressChannels: inChannels,
-			passthrough:     true,
-			egressChannels:  inChannels,
-		})
+		a.pathMode = "opus_passthrough"
+		a.pathVolumePercent = a.volume
+		a.pathIngressCodec = inCodec
+		a.pathIngressRate = inRate
+		a.pathIngressChannels = inChannels
+		a.pathDecodedLocally = false
 		return nil
 	}
 
@@ -297,21 +285,12 @@ func (a *AudioPath) processChunkLocked(chunk domain.AudioChunk) error {
 		a.transcodePackets++
 	}
 
-	egressCh := 1
-	if a.codec == domain.CodecOpus && inChannels == 2 {
-		egressCh = 2
-	}
-
-	a.recordPath(pathSnapshot{
-		mode:            "transcode",
-		volume:          a.volume,
-		ingressCodec:    inCodec,
-		ingressRate:     inRate,
-		ingressChannels: inChannels,
-		decodedLocally:  decodedLocally,
-		passthrough:     false,
-		egressChannels:  egressCh,
-	})
+	a.pathMode = "transcode"
+	a.pathVolumePercent = a.volume
+	a.pathIngressCodec = inCodec
+	a.pathIngressRate = inRate
+	a.pathIngressChannels = inChannels
+	a.pathDecodedLocally = decodedLocally
 
 	return nil
 }
@@ -482,10 +461,12 @@ func (a *AudioPath) Stats() AudioPathStats {
 		readyEndUs = a.ready[len(a.ready)-1].TimestampUs
 	}
 
+	summary, stages := a.buildPathDiagnosticsLocked()
+
 	return AudioPathStats{
 		Mode:               a.pathMode,
-		Summary:            a.pathSummary,
-		Stages:             append([]string(nil), a.pathStages...),
+		Summary:            summary,
+		Stages:             stages,
 		VolumePercent:      a.pathVolumePercent,
 		IngressCodec:       a.pathIngressCodec,
 		IngressRate:        a.pathIngressRate,
@@ -498,65 +479,74 @@ func (a *AudioPath) Stats() AudioPathStats {
 	}
 }
 
-func (a *AudioPath) recordPath(p pathSnapshot) {
-	a.pathMode = p.mode
-	a.pathVolumePercent = p.volume
-	a.pathIngressCodec = p.ingressCodec
-	a.pathIngressRate = p.ingressRate
-	a.pathIngressChannels = p.ingressChannels
-
-	outCh := p.egressChannels
-	if a.codec != domain.CodecOpus {
-		outCh = 1
-	} else if outCh <= 0 {
-		outCh = p.ingressChannels
-		if outCh != 1 && outCh != 2 {
-			outCh = 2
-		}
+func (a *AudioPath) buildPathDiagnosticsLocked() (string, []string) {
+	if a.pathMode == "" {
+		return "", nil
 	}
 
-	inLabel := fmt.Sprintf("%s %dHz %dch", strings.ToUpper(p.ingressCodec), p.ingressRate, p.ingressChannels)
+	inRate := a.pathIngressRate
+	if inRate <= 0 {
+		inRate = 48000
+	}
+	inChannels := a.pathIngressChannels
+	if inChannels <= 0 {
+		inChannels = 2
+	}
+	inCodec := a.pathIngressCodec
+	if inCodec == "" {
+		inCodec = "pcm"
+	}
+
+	outCh := 1
+	if a.codec == domain.CodecOpus && inChannels == 2 {
+		outCh = 2
+	}
+
+	inLabel := fmt.Sprintf("%s %dHz %dch", strings.ToUpper(inCodec), inRate, inChannels)
 	outLabel := fmt.Sprintf("%s %dHz %dch", strings.ToUpper(string(a.codec)), a.codec.SampleRate(), outCh)
-	volLabel := volumeStageLabel(p.volume)
+	volLabel := volumeStageLabel(a.pathVolumePercent)
+
+	if a.pathMode == "opus_passthrough" {
+		stages := []string{
+			"ingress " + inLabel,
+			"passthrough (no decode/encode, " + volLabel + ")",
+			"RTP " + outLabel,
+		}
+		summary := inLabel + " → passthrough → RTP " + strings.ToUpper(string(a.codec))
+		return summary, stages
+	}
 
 	var stages []string
 	stages = append(stages, "ingress "+inLabel)
-
-	if p.passthrough {
-		stages = append(stages, "passthrough (no decode/encode, "+volLabel+")")
-		stages = append(stages, "RTP "+outLabel)
-		a.pathSummary = inLabel + " → passthrough → RTP " + strings.ToUpper(string(a.codec))
-	} else {
-		if p.ingressCodec == "opus" || p.decodedLocally {
-			if p.decodedLocally {
-				stages = append(stages, "decode Opus → PCM")
-			} else {
-				stages = append(stages, "PCM from ingress Opus decode")
-			}
-		}
-		if a.codec != domain.CodecOpus && p.ingressChannels > 1 {
-			stages = append(stages, "downmix → mono")
-		}
-		stages = append(stages, volLabel)
-		if a.codec == domain.CodecOpus {
-			if p.ingressRate != 48000 {
-				stages = append(stages, fmt.Sprintf("resample %dHz → 48000Hz", p.ingressRate))
-			}
-			chLabel := "mono"
-			if outCh == 2 {
-				chLabel = "stereo"
-			}
-			stages = append(stages, "encode OPUS ("+chLabel+")")
+	if inCodec == "opus" || a.pathDecodedLocally {
+		if a.pathDecodedLocally {
+			stages = append(stages, "decode Opus → PCM")
 		} else {
-			if p.ingressRate != a.codec.SampleRate() {
-				stages = append(stages, fmt.Sprintf("resample %dHz → %dHz", p.ingressRate, a.codec.SampleRate()))
-			}
-			stages = append(stages, "encode "+strings.ToUpper(string(a.codec))+" (mono)")
+			stages = append(stages, "PCM from ingress Opus decode")
 		}
-		stages = append(stages, "RTP "+outLabel)
-		a.pathSummary = inLabel + " → transcode (" + volLabel + ") → RTP " + strings.ToUpper(string(a.codec))
 	}
-	a.pathStages = stages
+	if a.codec != domain.CodecOpus && inChannels > 1 {
+		stages = append(stages, "downmix → mono")
+	}
+	stages = append(stages, volLabel)
+	if a.codec == domain.CodecOpus {
+		if inRate != 48000 {
+			stages = append(stages, fmt.Sprintf("resample %dHz → 48000Hz", inRate))
+		}
+		chLabel := "mono"
+		if outCh == 2 {
+			chLabel = "stereo"
+		}
+		stages = append(stages, "encode OPUS ("+chLabel+")")
+	} else {
+		if inRate != a.codec.SampleRate() {
+			stages = append(stages, fmt.Sprintf("resample %dHz → %dHz", inRate, a.codec.SampleRate()))
+		}
+		stages = append(stages, "encode "+strings.ToUpper(string(a.codec))+" (mono)")
+	}
+	stages = append(stages, "RTP "+outLabel)
+	summary := inLabel + " → transcode (" + volLabel + ") → RTP " + strings.ToUpper(string(a.codec))
+	return summary, stages
 }
 
 func volumeStageLabel(vol int) string {
@@ -568,15 +558,4 @@ func volumeStageLabel(vol int) string {
 	}
 	db := float64(vol)/100.0*60.0 - 60.0
 	return fmt.Sprintf("volume %d%% (%.1f dB)", vol, db)
-}
-
-type pathSnapshot struct {
-	mode            string
-	volume          int
-	ingressCodec    string
-	ingressRate     int
-	ingressChannels int
-	decodedLocally  bool
-	passthrough     bool
-	egressChannels  int
 }

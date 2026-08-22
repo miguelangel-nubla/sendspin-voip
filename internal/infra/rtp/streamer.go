@@ -47,7 +47,7 @@ func NewStreamer(logger *slog.Logger, factory TranscoderFactory, portMin, portMa
 	}
 }
 
-// CreateSession allocates UDP transport and initializes a session with the 4-layer decoupled audio architecture.
+// CreateSession allocates UDP transport and initializes a session with the 3-stage decoupled audio architecture.
 func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -57,40 +57,31 @@ func (s *Streamer) CreateSession(codec domain.Codec) (app.RTPSession, error) {
 		activeCodec = domain.CodecG722
 	}
 
-	// 1. Layer 4: RTP Transport (UDP socket & packetizer)
-	transport, err := NewRTPTransport(s.portMin, s.portMax)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize RTP transport: %w", err)
-	}
-
-	// 2. Layer 1: Upstream Player (raw timeline buffer)
+	// 1. Upstream (raw timeline buffer)
 	upstream := NewUpstreamPlayer(0)
 
-	// 3. Layer 2: Audio Path (DSP & conversion engine wrapping Layer 1)
+	// 2. Audio Path (DSP & conversion engine wrapping Upstream)
 	audioPath := NewAudioPath(s.transcoderFactory(), upstream, activeCodec, 100)
 
-	// 4. Layer 3: Downstream Player (playout timing policy wrapping Layer 2 & Layer 4)
-	downstream := NewDownstreamPlayer(
-		s.logger,
-		activeCodec,
-		audioPath,
-		transport,
-	)
+	// 3. Transmitter (20ms playout pacing, PlayAt timing sync, RFC 3550 RTP, and UDP socket)
+	transmitter, err := NewTransmitter(s.logger, audioPath, activeCodec, s.portMin, s.portMax)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize RTP transmitter: %w", err)
+	}
 
 	sess := &Session{
-		logger:     s.logger,
-		codec:      activeCodec,
-		upstream:   upstream,
-		audioPath:  audioPath,
-		downstream: downstream,
-		transport:  transport,
+		logger:      s.logger,
+		codec:       activeCodec,
+		upstream:    upstream,
+		audioPath:   audioPath,
+		transmitter: transmitter,
 	}
 	sess.curVolume.Store(100)
 
 	return sess, nil
 }
 
-// Session implements app.RTPSession coordinating the 4 decoupled layers.
+// Session implements app.RTPSession coordinating the 3 decoupled stages.
 type Session struct {
 	mu        sync.Mutex
 	logger    *slog.Logger
@@ -98,24 +89,23 @@ type Session struct {
 	answered  bool
 	curVolume atomic.Int32
 
-	upstream   *UpstreamPlayer
-	audioPath  *AudioPath
-	downstream *DownstreamPlayer
-	transport  *RTPTransport
+	upstream    *UpstreamPlayer
+	audioPath   *AudioPath
+	transmitter *Transmitter
 }
 
-// LocalPort returns the bound UDP port on RTPTransport.
+// LocalPort returns the bound UDP port on Transmitter.
 func (s *Session) LocalPort() int {
-	return s.transport.LocalPort()
+	return s.transmitter.LocalPort()
 }
 
-// SetAnswered marks call as answered in DownstreamPlayer.
+// SetAnswered marks call as answered in Transmitter.
 func (s *Session) SetAnswered(answered bool) {
 	s.mu.Lock()
 	s.answered = answered
 	s.mu.Unlock()
 
-	s.downstream.SetAnswered(answered)
+	s.transmitter.SetAnswered(answered)
 }
 
 // SetVolume updates volume in AudioPath, rewinding unplayed upstream chunks for re-encoding.
@@ -124,7 +114,7 @@ func (s *Session) SetVolume(volumePercent int) {
 	s.audioPath.SetVolume(volumePercent)
 }
 
-// SetCodec updates target transmission codec across AudioPath, DownstreamPlayer, and RTPTransport.
+// SetCodec updates target transmission codec across AudioPath and Transmitter.
 func (s *Session) SetCodec(codec domain.Codec) {
 	s.mu.Lock()
 	if codec == "" || codec == s.codec {
@@ -135,12 +125,12 @@ func (s *Session) SetCodec(codec domain.Codec) {
 	s.mu.Unlock()
 
 	s.audioPath.SetCodec(codec)
-	s.downstream.SetCodec(codec)
+	s.transmitter.SetCodec(codec)
 }
 
 // StartTransmission configures remote RTP target address and triggers playout.
 func (s *Session) StartTransmission(remoteAddr *net.UDPAddr) error {
-	s.transport.SetRemoteAddr(remoteAddr)
+	s.transmitter.SetRemoteAddr(remoteAddr)
 	s.SetAnswered(true)
 	return nil
 }
@@ -161,17 +151,17 @@ func (s *Session) PushAudio(chunk domain.AudioChunk, volumePercent int) error {
 // ClearBuffer synchronously resets all layers on seek or stream stop.
 func (s *Session) ClearBuffer() {
 	s.audioPath.Clear()
-	s.downstream.ResetMarker()
+	s.transmitter.ResetMarker()
 }
 
-// Stats returns comprehensive runtime metrics across all 4 layers.
+// Stats returns comprehensive runtime metrics across all pipeline stages.
 func (s *Session) Stats() app.RTPStats {
 	s.mu.Lock()
 	codec := s.codec
 	answered := s.answered
 	s.mu.Unlock()
 
-	packetsSent, bytesSent, localPort, remoteStr := s.transport.Stats()
+	packetsSent, bytesSent, localPort, remoteStr := s.transmitter.Stats()
 	apStats := s.audioPath.Stats()
 	upChunks := s.upstream.Len()
 	upOldest, upNewest, _ := s.upstream.PlayAtBounds()
@@ -213,11 +203,5 @@ func (s *Session) Stats() app.RTPStats {
 
 // DrainAndClose stops playout, drains pending frames, and closes the RTP socket.
 func (s *Session) DrainAndClose(drainDelay time.Duration) error {
-	s.downstream.Stop()
-
-	if drainDelay > 0 {
-		time.Sleep(drainDelay)
-	}
-
-	return s.transport.Close()
+	return s.transmitter.DrainAndClose(drainDelay)
 }
